@@ -7,6 +7,7 @@ import type { ExampleFile } from './examples';
 export const WORKSPACE_DIR = 'nulvless';
 export const CONFIG_FILE = 'nulvless.jsonc';
 export const FUNCTIONS_DIR = 'functions';
+export const TEMPLATES_DIR = 'templates';
 export const WORKSPACE_SCHEMA_URL = 'https://cdn.jsdelivr.net/npm/@nulvless/cli/schema/workspace.schema.json';
 export const FUNCTION_SLUG = /^(?=.{3,50}$)[a-z0-9]+(-[a-z0-9]+)*$/;
 
@@ -55,10 +56,11 @@ export async function initWorkspace(root: string, link: WorkspaceLink) {
   }
 
   await mkdir(join(root, WORKSPACE_DIR, FUNCTIONS_DIR), { recursive: true });
+  await mkdir(join(root, WORKSPACE_DIR, TEMPLATES_DIR), { recursive: true });
   await writeFile(join(root, CONFIG_PATH), renderConfig(link));
   await writeFile(join(root, WORKSPACE_DIR, '.gitignore'), `${LOCAL_ENV_FILE}\n`);
 
-  return [CONFIG_PATH, `${WORKSPACE_DIR}/.gitignore`, `${WORKSPACE_DIR}/${FUNCTIONS_DIR}/`];
+  return [CONFIG_PATH, `${WORKSPACE_DIR}/.gitignore`, `${WORKSPACE_DIR}/${FUNCTIONS_DIR}/`, `${WORKSPACE_DIR}/${TEMPLATES_DIR}/`];
 }
 
 export async function readWorkspaceConfig(root: string): Promise<WorkspaceConfig> {

@@ -233,8 +233,9 @@ export interface PlatformTemplate {
   slug: string;
   channel: string;
   name: string;
-  overrides: string[];
 }
+
+export type ListedTemplate = Pick<StoredTemplate, 'slug' | 'channel' | 'language'>;
 
 export interface TemplateBody {
   slug?: string;
@@ -315,7 +316,13 @@ export const resources = {
     api.get<CommonTemplates>('/projects/templates/commons', { organization: scope.organization }),
 
   projectTemplates: (api: Api, scope: Scope, environment: string, filters: Record<string, string> = {}) =>
-    allPages<StoredTemplate>(api, templatesPath(scope, environment), scope.organization, { source: 'project', ...filters }),
+    allPages<ListedTemplate>(api, templatesPath(scope, environment), scope.organization, { source: 'project', ...filters }),
+
+  templateVersion: (api: Api, scope: Scope, environment: string, template: ListedTemplate) =>
+    api.get<StoredTemplate>(
+      `${templatesPath(scope, environment)}/${template.channel}/${encodeURIComponent(template.slug)}/${template.language}`,
+      { organization: scope.organization },
+    ),
 
   platformTemplates: (api: Api, scope: Scope, environment: string, filters: Record<string, string>) =>
     api.get<Page<PlatformTemplate>>(templatesPath(scope, environment), {

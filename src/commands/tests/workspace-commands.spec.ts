@@ -67,6 +67,10 @@ const COMMONS = {
   sms: [{ key: 'phone-otp-verification', name: 'Code', description: '', keys: [] }],
 };
 
+function listedTemplate({ subject: _subject, content: _content, common: _common, ...summary }: Record<string, unknown>) {
+  return summary;
+}
+
 async function harness(
   flags: Partial<GlobalFlags> = {},
   deployed: string[] = [],
@@ -85,7 +89,13 @@ async function harness(
     get: jest.fn(async (path: string) => {
       if (path in routes) return routes[path];
       if (path === '/projects/templates/commons') return COMMONS;
-      if (path.endsWith('/templates')) return { items: projectTemplates, total: projectTemplates.length };
+      if (path.endsWith('/templates')) return { items: projectTemplates.map(listedTemplate), total: projectTemplates.length };
+      const version = path.match(/\/templates\/(email|sms)\/([^/]+)\/([^/]+)$/);
+      if (version) {
+        return projectTemplates.find(
+          (template) => template.channel === version[1] && template.slug === version[2] && template.language === version[3],
+        );
+      }
       return { items: deployed.map((slug) => ({ slug })), total: deployed.length };
     }),
     post: jest.fn(async () => ({ slug: 'created', short_version: 'v1' })),
@@ -141,7 +151,7 @@ describe('init', () => {
 
     expect(JSON.parse(cli.stdout.join(''))).toEqual({
       root: cli.cwd,
-      files: ['nulvless/nulvless.jsonc', 'nulvless/.gitignore', 'nulvless/functions/'],
+      files: ['nulvless/nulvless.jsonc', 'nulvless/.gitignore', 'nulvless/functions/', 'nulvless/templates/'],
     });
   });
 });
@@ -537,13 +547,13 @@ describe('templates pull', () => {
 
 describe('templates list', () => {
   const platform = [
-    { slug: 'welcome-user', channel: 'email', name: 'Welcome', description: '', keys: [], overrides: ['pt-BR'] },
-    { slug: 'phone-otp-verification', channel: 'sms', name: 'Code', description: '', keys: [], overrides: [] },
+    { slug: 'welcome-user', channel: 'email', name: 'Welcome', description: '', keys: [] },
+    { slug: 'phone-otp-verification', channel: 'sms', name: 'Code', description: '', keys: [] },
   ];
   const own = [
-    { slug: 'welcome-user', channel: 'email', language: 'pt-BR', content: '<p>Olá</p>', common: true },
-    { slug: 'order-shipped', channel: 'sms', language: 'en-US', content: 'Shipped', common: false },
-    { slug: 'order-shipped', channel: 'sms', language: 'pt-BR', content: 'Enviado', common: false },
+    { slug: 'welcome-user', channel: 'email', language: 'pt-BR' },
+    { slug: 'order-shipped', channel: 'sms', language: 'en-US' },
+    { slug: 'order-shipped', channel: 'sms', language: 'pt-BR' },
   ];
 
   async function listing() {
@@ -634,7 +644,7 @@ describe('pull', () => {
 
     await expect(cli.run('pull')).rejects.toMatchObject({ hint: 'Pass --yes to confirm without a prompt.' });
     await expect(readFile(join(cli.cwd, 'nulvless/functions/hello/index.ts'), 'utf8')).resolves.toContain('handler');
-    await expect(stat(join(cli.cwd, 'nulvless/templates'))).rejects.toThrow();
+    await expect(stat(join(cli.cwd, 'nulvless/templates/email'))).rejects.toThrow();
   });
 
   it('lists what it wrote as JSON', async () => {

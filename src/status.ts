@@ -57,6 +57,13 @@ export interface StatusReport {
   setup: { done: number; total: number; next: { title: string; fix: StatusFix } | null };
 }
 
+export interface StatusChanges {
+  appeared: StatusIssue[];
+  resolved: StatusIssue[];
+}
+
+export const issueKey = (issue: StatusIssue) => `${issue.code}:${issue.title}`;
+
 export interface StatusSources {
   project: Project;
   overview: ProjectOverview;
@@ -316,7 +323,14 @@ function columns(rows: string[][]) {
   );
 }
 
-export function renderStatus(report: StatusReport, link: (text: string, url: string) => string) {
+const NO_CHANGES: StatusChanges = { appeared: [], resolved: [] };
+
+export function renderStatus(
+  report: StatusReport,
+  link: (text: string, url: string) => string,
+  changes: StatusChanges = NO_CHANGES,
+) {
+  const appeared = new Set(changes.appeared.map(issueKey));
   const lines: string[] = [];
   const place = report.environments.find((environment) => environment.slug === report.environment)?.name ?? report.environment;
 
@@ -324,14 +338,16 @@ export function renderStatus(report: StatusReport, link: (text: string, url: str
   lines.push(toned(`${report.tone === 'building' ? '◌' : '●'} ${report.headline}`, TONE_COLORS[report.tone]));
   if (report.summary) lines.push(pc.dim(report.summary));
 
-  if (report.issues.length) {
+  if (report.issues.length || changes.resolved.length) {
     lines.push('');
     for (const issue of report.issues) {
       const mark = issue.severity === 'problem' ? toned('✗', 'bad') : toned('!', 'pending');
-      lines.push(`${INDENT}${mark} ${issue.title}`);
+      const fresh = appeared.has(issueKey(issue)) ? ` ${toned('new', 'pending')}` : '';
+      lines.push(`${INDENT}${mark} ${issue.title}${fresh}`);
       lines.push(`${DETAIL_INDENT}${pc.dim(issue.detail)}`);
       lines.push(`${DETAIL_INDENT}${fixLine(issue.fix, link)}`);
     }
+    for (const issue of changes.resolved) lines.push(`${INDENT}${toned('✓', 'good')} ${issue.title} ${pc.dim('resolved')}`);
   }
 
   if (report.environments.length) {

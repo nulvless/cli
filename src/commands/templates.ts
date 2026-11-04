@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import { Option, type Command } from 'commander';
-import { resources, type PlatformTemplate, type StoredTemplate, type TemplateBody } from '../api/resources';
+import type { Api } from '../api/http';
+import { resources, type ListedTemplate, type PlatformTemplate, type Scope, type TemplateBody } from '../api/resources';
 import type { ContextFactory } from '../context';
 import { CliError } from '../errors';
 import { downloadExample, fetchCatalog, findExample } from '../examples';
@@ -41,21 +42,31 @@ interface TemplateRow {
   languages: string[];
 }
 
-function templateRows(platform: PlatformTemplate[], own: StoredTemplate[]): TemplateRow[] {
+const templateKey = (template: { channel: string; slug: string }) => `${template.channel}/${template.slug}`;
+
+export async function ownTemplates(api: Api, target: Scope, environment: string, slugs: string[] = []) {
+  const listed = await resources.projectTemplates(api, target, environment);
+  const wanted = listed.filter((template) => !slugs.length || slugs.includes(template.slug));
+  return Promise.all(wanted.map((template) => resources.templateVersion(api, target, environment, template)));
+}
+
+function templateRows(platform: PlatformTemplate[], own: ListedTemplate[]): TemplateRow[] {
+  const languages = new Map<string, string[]>();
+  for (const entry of own) languages.set(templateKey(entry), [...(languages.get(templateKey(entry)) ?? []), entry.language]);
+
+  const platformKeys = new Set(platform.map(templateKey));
   const builtIn: TemplateRow[] = platform
     .filter((template) => TEMPLATE_CHANNELS.includes(template.channel as TemplateChannel))
-    .map((template) => ({
-      slug: template.slug,
-      channel: template.channel,
-      kind: template.overrides.length ? 'customized' : 'default',
-      languages: template.overrides,
-    }));
-  const custom: TemplateRow[] = workspaceTemplatesOf(own.filter((entry) => !entry.common)).map((template) => ({
-    slug: template.slug,
-    channel: template.channel,
-    kind: 'custom',
-    languages: template.versions.map((version) => version.language),
-  }));
+    .map((template) => {
+      const customized = languages.get(templateKey(template)) ?? [];
+      return { slug: template.slug, channel: template.channel, kind: customized.length ? 'customized' : 'default', languages: customized };
+    });
+  const custom: TemplateRow[] = [...languages]
+    .filter(([key]) => !platformKeys.has(key))
+    .map(([key, customLanguages]) => {
+      const [channel, slug] = key.split('/') as [string, string];
+      return { slug, channel, kind: 'custom', languages: customLanguages };
+    });
   return [...builtIn, ...custom];
 }
 
@@ -213,10 +224,8 @@ export function registerTemplateCommands(program: Command, context: ContextFacto
       const env = requireEnvironment(options.env);
       const root = await requireWorkspace(cwd);
       const target = await scope();
-      const stored = await output.task(`Loading templates of ${env}`, () =>
-        resources.projectTemplates(api, target, env),
-      );
-      const pulled = workspaceTemplatesOf(stored.filter((entry) => !slugs.length || slugs.includes(entry.slug)));
+      const stored = await output.task(`Loading templates of ${env}`, () => ownTemplates(api, target, env, slugs));
+      const pulled = workspaceTemplatesOf(stored);
       if (!pulled.length) {
         throw new CliError(`${env} has no templates of its own yet.`, {
           hint: 'Change one in the console, or create one with `nulvless templates new` and push it.',

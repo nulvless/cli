@@ -7,6 +7,7 @@ import { environmentOption } from '../environment-option';
 import { CliError } from '../errors';
 import { downloadExample, fetchCatalog, findExample, type ExampleKind } from '../examples';
 import { templatePath, workspaceTemplatesOf, writeTemplate } from '../templates';
+import { ownTemplates } from './templates';
 import { examples } from '../ui/help';
 import {
   findWorkspace,
@@ -65,7 +66,7 @@ export function registerWorkspaceCommands(program: Command, context: ContextFact
 
       const target = await scope();
       const [functions, stored] = await output.task('Loading functions and templates', () =>
-        Promise.all([resources.functions(api, target), resources.projectTemplates(api, target, options.env)]),
+        Promise.all([resources.functions(api, target), ownTemplates(api, target, options.env)]),
       );
       const functionPaths = functions.map((fn) => ({ slug: fn.slug, path: `${WORKSPACE_DIR}/${FUNCTIONS_DIR}/${fn.slug}` }));
       const templates = workspaceTemplatesOf(stored).map((template) => ({

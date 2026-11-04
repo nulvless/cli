@@ -13,7 +13,7 @@ describe('initWorkspace', () => {
 
     const created = await initWorkspace(root, { organization: 'acme', project: 'shop' });
 
-    expect(created).toEqual(['nulvless/nulvless.jsonc', 'nulvless/.gitignore', 'nulvless/functions/']);
+    expect(created).toEqual(['nulvless/nulvless.jsonc', 'nulvless/.gitignore', 'nulvless/functions/', 'nulvless/templates/']);
     await expect(readWorkspaceConfig(root)).resolves.toEqual({ organization: 'acme', project: 'shop', functions: {} });
     await expect(readFile(join(root, 'nulvless/.gitignore'), 'utf8')).resolves.toBe('.env.local\n');
   });

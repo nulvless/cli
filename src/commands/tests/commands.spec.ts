@@ -1204,6 +1204,21 @@ describe('status', () => {
     await expect(cli.run('status', '--fail-on', 'warning')).resolves.toBeUndefined();
   });
 
+  it('only takes --timeout together with --until-ok', async () => {
+    const cli = harness({ routes: statusRoutes });
+
+    await expect(cli.run('status', '--timeout', '60')).rejects.toMatchObject({ message: '--timeout needs --until-ok.' });
+  });
+
+  it('waits until nothing needs attention, then prints the report as JSON', async () => {
+    const healthy = { ...statusRoutes, '/projects/shop/overview': { ...statusRoutes['/projects/shop/overview'], issues: [] } };
+    const cli = harness({ routes: healthy });
+
+    await cli.run('status', '--until-ok', '--json');
+
+    expect(JSON.parse(cli.stdout.join(''))).toMatchObject({ tone: 'ok' });
+  });
+
   it('refuses to watch outside a terminal', async () => {
     const cli = harness({ routes: statusRoutes });
 
