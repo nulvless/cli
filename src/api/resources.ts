@@ -101,9 +101,69 @@ export interface OAuthClient {
 
 export interface ServiceHealth {
   service: string;
-  status: string;
+  status: 'up' | 'down';
   latency_ms?: number;
-  error?: string | null;
+  error?: { reason: string; message: string } | null;
+}
+
+export interface ProjectHealth {
+  status: 'ok' | 'degraded' | 'down';
+  checked_at: string;
+  services: ServiceHealth[];
+}
+
+export type OverviewIssueCode =
+  | 'project_failed'
+  | 'project_pause_stalled'
+  | 'project_delete_stalled'
+  | 'environment_failed'
+  | 'deployment_failed'
+  | 'function_errors'
+  | 'email_provider_missing'
+  | 'sms_provider_missing'
+  | 'social_provider_unconfigured'
+  | 'signing_key_missing'
+  | 'site_url_localhost'
+  | 'payment_gateway_unconfigured'
+  | 'payment_webhook_missing'
+  | 'custom_domain_failed'
+  | 'custom_domain_suspended';
+
+export interface OverviewIssue {
+  code: OverviewIssueCode;
+  severity: 'warning' | 'problem';
+  environment?: string;
+  service?: string;
+  deployment_id?: string;
+  function_slug?: string | null;
+  provider?: string;
+  value?: number;
+  hostname?: string;
+}
+
+export interface OverviewEnvironment {
+  name: string;
+  slug: string;
+  production: boolean;
+  status: string;
+  url: string | null;
+  failed_services: string[];
+  custom_domain?: { hostname: string; status: string } | null;
+}
+
+export type OverviewStepCode = 'api_key' | 'sign_in' | 'email_provider' | 'first_function' | 'payment_gateway';
+
+export interface ProjectOverview {
+  environment: string;
+  environments: OverviewEnvironment[];
+  issues: OverviewIssue[];
+  steps: { code: OverviewStepCode; done: boolean }[];
+  pulse: {
+    users: { sign_ups: number; active_users: number; total_users: number } | null;
+    functions: { invocations: number; errors: number; error_rate: number } | null;
+    messages: { sent: number; failed: number; trend: number[] } | null;
+    events: { total: number; errors: number; trend: number[] } | null;
+  };
 }
 
 export interface Domain {
@@ -382,7 +442,13 @@ export const resources = {
     api.delete(`/projects/${encodeURIComponent(project)}`, { organization }),
 
   projectHealth: (api: Api, scope: Scope) =>
-    api.get<ServiceHealth[]>(`/projects/${encodeURIComponent(scope.project)}/health`, { organization: scope.organization }),
+    api.get<ProjectHealth>(`/projects/${encodeURIComponent(scope.project)}/health`, { organization: scope.organization }),
+
+  projectOverview: (api: Api, scope: Scope, environment: string) =>
+    api.get<ProjectOverview>(`/projects/${encodeURIComponent(scope.project)}/overview`, {
+      organization: scope.organization,
+      query: { environment },
+    }),
 
   domains: (api: Api, scope: Scope) =>
     api.get<Domain[]>(`/projects/${encodeURIComponent(scope.project)}/domains`, { organization: scope.organization }),

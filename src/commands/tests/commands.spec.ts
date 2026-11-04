@@ -854,10 +854,14 @@ const orgRoutes = {
     { slug: 'blog', name: 'Blog', status: 'paused', services: ['auth'] },
   ],
   '/projects/shop': { slug: 'shop', name: 'Shop', status: 'ready', environments: [{ slug: 'main', name: 'Production', status: 'ready', url: 'https://shop.nulvless.co' }] },
-  '/projects/shop/health': [
-    { service: 'auth', status: 'up', latency_ms: 42, error: null },
-    { service: 'communications', status: 'down', latency_ms: 3000, error: 'timeout' },
-  ],
+  '/projects/shop/health': {
+    status: 'degraded',
+    checked_at: '2026-11-04T12:00:00.000Z',
+    services: [
+      { service: 'auth', status: 'up', latency_ms: 42, error: null },
+      { service: 'communications', status: 'down', latency_ms: 3000, error: { reason: 'timeout', message: 'timed out after 3s' } },
+    ],
+  },
   '/projects/shop/domains': [
     { hostname: 'id.shop.com', status: 'pending', verification: 'pending', certificate: 'pending', dns: { type: 'CNAME', name: 'id.shop.com', value: 'shop.nulvless.co' } },
   ],
@@ -901,7 +905,7 @@ describe('projects', () => {
 
     await cli.run('projects', 'health');
 
-    expect(cli.stdout.join('')).toMatch(/communications\s+down\s+3000ms\s+timeout/);
+    expect(cli.stdout.join('')).toMatch(/communications\s+down\s+3000ms\s+timed out after 3s/);
   });
 
   it.each([
@@ -1138,5 +1142,71 @@ describe('secrets unset', () => {
     expect(cli.api.delete).toHaveBeenCalledWith('/projects/shop/functions/checkout/secrets/STRIPE_KEY', {
       organization: 'acme',
     });
+  });
+});
+
+const statusRoutes = {
+  '/projects/shop': { slug: 'shop', name: 'Shop', status: 'ready', environments: [] },
+  '/projects/shop/overview': {
+    environment: 'main',
+    environments: [
+      { name: 'Production', slug: 'main', production: true, status: 'ready', url: 'https://shop.nulvless.co', failed_services: [], custom_domain: null },
+    ],
+    issues: [{ code: 'deployment_failed', severity: 'problem', deployment_id: 'dep_8f2k', function_slug: 'checkout' }],
+    steps: [{ code: 'api_key', done: true }],
+    pulse: { users: null, functions: null, messages: { sent: 940, failed: 0, trend: [0, 4, 8] }, events: null },
+  },
+  '/projects/shop/health': { status: 'ok', checked_at: '2026-11-04T12:00:00.000Z', services: [{ service: 'auth', status: 'up', latency_ms: 40, error: null }] },
+  '/projects/shop/deployments': { items: [], total: 0 },
+};
+
+describe('status', () => {
+  it('leads with the verdict and pairs each problem with its fix', async () => {
+    const cli = harness({ routes: statusRoutes });
+
+    await cli.run('status');
+
+    const output = cli.stdout.join('');
+    expect(output.split('\n')[1]).toBe('● 1 problem needs you.');
+    expect(output).toMatch(/✗ The checkout deploy failed\n\s+The previous version is still live.\n\s+nulvless deployments get dep_8f2k/);
+    expect(output).toContain('▁▅█');
+  });
+
+  it('asks the API about the chosen environment', async () => {
+    const cli = harness({ routes: statusRoutes });
+
+    await cli.run('status', '--env', 'staging');
+
+    expect(cli.api.get).toHaveBeenCalledWith('/projects/shop/overview', { organization: 'acme', query: { environment: 'staging' } });
+  });
+
+  it('prints the report as JSON with the fix of each problem', async () => {
+    const cli = harness({ routes: statusRoutes });
+
+    await cli.run('status', '--json');
+
+    expect(JSON.parse(cli.stdout.join(''))).toMatchObject({
+      tone: 'problem',
+      issues: [{ code: 'deployment_failed', fix: { command: 'nulvless deployments get dep_8f2k' } }],
+    });
+  });
+
+  it('fails a CI step when there is a problem, after printing the report', async () => {
+    const cli = harness({ routes: statusRoutes });
+
+    await expect(cli.run('status', '--fail-on', 'problem')).rejects.toMatchObject({ message: '1 problem needs you.' });
+    expect(cli.stdout.join('')).toContain('The checkout deploy failed');
+  });
+
+  it('passes --fail-on warning when nothing needs attention', async () => {
+    const cli = harness({ routes: { ...statusRoutes, '/projects/shop/overview': { ...statusRoutes['/projects/shop/overview'], issues: [] } } });
+
+    await expect(cli.run('status', '--fail-on', 'warning')).resolves.toBeUndefined();
+  });
+
+  it('refuses to watch outside a terminal', async () => {
+    const cli = harness({ routes: statusRoutes });
+
+    await expect(cli.run('status', '--watch', '--json')).rejects.toMatchObject({ message: 'status --watch needs a terminal.' });
   });
 });

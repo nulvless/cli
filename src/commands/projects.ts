@@ -82,12 +82,12 @@ export function registerProjectCommands(program: Command, context: ContextFactor
 
       const target = await scope();
       output.table(
-        await output.task(`Checking ${target.project}`, () => resources.projectHealth(api, target)),
+        (await output.task(`Checking ${target.project}`, () => resources.projectHealth(api, target))).services,
         [
           { header: 'SERVICE', value: (service) => service.service },
           { header: 'STATUS', value: (service) => service.status, tone: (service) => (service.status === 'up' ? 'good' : 'bad') },
           { header: 'LATENCY', value: (service) => (service.latency_ms === undefined ? '' : `${service.latency_ms}ms`) },
-          { header: 'ERROR', value: (service) => service.error ?? '' },
+          { header: 'ERROR', value: (service) => service.error?.message ?? '' },
         ],
         { message: 'No services to check.' },
       );

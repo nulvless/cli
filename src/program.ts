@@ -11,6 +11,7 @@ import { registerOAuthCommands } from './commands/oauth';
 import { registerOrganizationCommands } from './commands/organizations';
 import { registerProjectCommands } from './commands/projects';
 import { registerSecretCommands } from './commands/secrets';
+import { registerStatusCommands } from './commands/status';
 import { registerTemplateCommands } from './commands/templates';
 import { registerUserCommands } from './commands/users';
 import { registerWorkspaceCommands } from './commands/workspace';
@@ -68,6 +69,7 @@ export function buildProgram(context: ContextFactory, version: string) {
   registerUserCommands(program, context);
   registerSecretCommands(program, context);
   registerTemplateCommands(program, context, version);
+  registerStatusCommands(program, context);
   registerDocsCommand(program, context);
   registerDoctorCommand(program, context, version);
 
