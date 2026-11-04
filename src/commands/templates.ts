@@ -1,12 +1,13 @@
 import { join } from 'node:path';
 import { Option, type Command } from 'commander';
-import { resources, type StoredTemplate, type TemplateBody } from '../api/resources';
+import { resources, type PlatformTemplate, type StoredTemplate, type TemplateBody } from '../api/resources';
 import type { ContextFactory } from '../context';
 import { CliError } from '../errors';
 import { downloadExample, fetchCatalog, findExample } from '../examples';
 import {
   readTemplates,
   starterTemplate,
+  TEMPLATE_CHANNELS,
   TEMPLATE_SLUG,
   templateFilesFor,
   templatePath,
@@ -55,6 +56,31 @@ function groupBySlug(stored: StoredTemplate[]): WorkspaceTemplate[] {
   return [...templates.values()];
 }
 
+interface TemplateRow {
+  slug: string;
+  channel: string;
+  kind: 'default' | 'customized' | 'custom';
+  languages: string[];
+}
+
+function templateRows(platform: PlatformTemplate[], own: StoredTemplate[]): TemplateRow[] {
+  const builtIn: TemplateRow[] = platform
+    .filter((template) => TEMPLATE_CHANNELS.includes(template.channel as TemplateChannel))
+    .map((template) => ({
+      slug: template.slug,
+      channel: template.channel,
+      kind: template.overrides.length ? 'customized' : 'default',
+      languages: template.overrides,
+    }));
+  const custom: TemplateRow[] = groupBySlug(own.filter((entry) => !entry.common)).map((template) => ({
+    slug: template.slug,
+    channel: template.channel,
+    kind: 'custom',
+    languages: template.versions.map((version) => version.language),
+  }));
+  return [...builtIn, ...custom];
+}
+
 export function registerTemplateCommands(program: Command, context: ContextFactory, version: string) {
   const templates = program
     .command('templates')
@@ -62,11 +88,43 @@ export function registerTemplateCommands(program: Command, context: ContextFacto
     .addHelpText(
       'after',
       examples([
+        'nulvless templates list --env main',
         'nulvless templates new welcome-user --template welcome-user',
         'nulvless templates push --env staging',
         'nulvless templates pull --env main',
       ]),
     );
+
+  templates
+    .command('list')
+    .description('List the templates of an environment: the defaults, the ones you customized and your own')
+    .addOption(new Option('--channel <channel>', 'only email or only SMS').choices(['email', 'sms']))
+    .addOption(environmentOption())
+    .action(async (options: { env?: string; channel?: TemplateChannel }, command: Command) => {
+      const { api, scope, output } = await context(command.optsWithGlobals());
+
+      const env = requireEnvironment(options.env);
+      const target = await scope();
+      const filters: Record<string, string> = options.channel ? { channel: options.channel } : {};
+      const [platform, own] = await output.task(`Loading templates of ${env}`, () =>
+        Promise.all([
+          resources.platformTemplates(api, target, env, filters),
+          resources.projectTemplates(api, target, env, filters),
+        ]),
+      );
+
+      output.table(
+        templateRows(platform.items, own),
+        [
+          { header: 'SLUG', value: (row) => row.slug },
+          { header: 'CHANNEL', value: (row) => row.channel },
+          { header: 'KIND', value: (row) => row.kind, tone: (row) => (row.kind === 'default' ? 'plain' : 'good') },
+          { header: 'LANGUAGES', value: (row) => row.languages.join(', ') },
+        ],
+        { message: `${env} has no templates.` },
+      );
+      if (!output.json) output.note('Replace a default: nulvless templates new <slug>, then templates push');
+    });
 
   templates
     .command('new')

@@ -169,6 +169,13 @@ export interface StoredTemplate {
   common?: boolean;
 }
 
+export interface PlatformTemplate {
+  slug: string;
+  channel: string;
+  name: string;
+  overrides: string[];
+}
+
 export interface TemplateBody {
   slug?: string;
   channel?: string;
@@ -247,8 +254,14 @@ export const resources = {
   commonTemplates: (api: Api, scope: Scope) =>
     api.get<CommonTemplates>('/projects/templates/commons', { organization: scope.organization }),
 
-  projectTemplates: (api: Api, scope: Scope, environment: string) =>
-    allPages<StoredTemplate>(api, templatesPath(scope, environment), scope.organization, { source: 'project' }),
+  projectTemplates: (api: Api, scope: Scope, environment: string, filters: Record<string, string> = {}) =>
+    allPages<StoredTemplate>(api, templatesPath(scope, environment), scope.organization, { source: 'project', ...filters }),
+
+  platformTemplates: (api: Api, scope: Scope, environment: string, filters: Record<string, string>) =>
+    api.get<Page<PlatformTemplate>>(templatesPath(scope, environment), {
+      organization: scope.organization,
+      query: { source: 'platform', ...filters },
+    }),
 
   createTemplate: (api: Api, scope: Scope, environment: string, body: TemplateBody) =>
     api.post<StoredTemplate>(templatesPath(scope, environment), { organization: scope.organization, body }),

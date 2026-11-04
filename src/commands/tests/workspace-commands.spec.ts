@@ -535,6 +535,61 @@ describe('templates pull', () => {
   });
 });
 
+describe('templates list', () => {
+  const platform = [
+    { slug: 'welcome-user', channel: 'email', name: 'Welcome', description: '', keys: [], overrides: ['pt-BR'] },
+    { slug: 'phone-otp-verification', channel: 'sms', name: 'Code', description: '', keys: [], overrides: [] },
+  ];
+  const own = [
+    { slug: 'welcome-user', channel: 'email', language: 'pt-BR', content: '<p>Olá</p>', common: true },
+    { slug: 'order-shipped', channel: 'sms', language: 'en-US', content: 'Shipped', common: false },
+    { slug: 'order-shipped', channel: 'sms', language: 'pt-BR', content: 'Enviado', common: false },
+  ];
+
+  async function listing() {
+    const cli = await harness();
+    cli.api.get.mockImplementation(async (_path: string, request?: { query?: { source?: string } }) =>
+      request?.query?.source === 'platform' ? { items: platform, total: platform.length } : { items: own, total: own.length },
+    );
+    return cli;
+  }
+
+  it('shows which templates are the default, customized or the project own', async () => {
+    const cli = await listing();
+
+    await cli.run('templates', 'list', '--env', 'staging');
+
+    const lines = cli.stdout.join('').split('\n');
+    expect(lines.find((line) => line.includes('welcome-user'))).toMatch(/email\s+customized\s+pt-BR/);
+    expect(lines.find((line) => line.includes('phone-otp-verification'))).toMatch(/sms\s+default/);
+    expect(lines.find((line) => line.includes('order-shipped'))).toMatch(/sms\s+custom\s+en-US, pt-BR/);
+  });
+
+  it('asks the API for one channel', async () => {
+    const cli = await listing();
+
+    await cli.run('templates', 'list', '--env', 'main', '--channel', 'sms');
+
+    expect(cli.api.get).toHaveBeenCalledWith('/projects/shop/main/templates', {
+      organization: 'acme',
+      query: { source: 'platform', channel: 'sms' },
+    });
+  });
+
+  it('prints the same rows as JSON', async () => {
+    const cli = await listing();
+
+    await cli.run('templates', 'list', '--env', 'main', '--json');
+
+    expect(JSON.parse(cli.stdout.join(''))).toContainEqual({
+      slug: 'order-shipped',
+      channel: 'sms',
+      kind: 'custom',
+      languages: ['en-US', 'pt-BR'],
+    });
+  });
+});
+
 describe('functions pull', () => {
   const sources = {
     '/projects/shop/functions': { items: [{ slug: 'checkout' }, { slug: 'hello' }], total: 2 },
