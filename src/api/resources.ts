@@ -379,7 +379,7 @@ export const resources = {
   apiKeys: (api: Api, scope: Scope, environment: string) =>
     api.get<ApiKey[]>(`${environmentPath(scope, environment)}/api-keys`, { organization: scope.organization }),
 
-  createApiKey: (api: Api, scope: Scope, environment: string, body: { name: string; type: string }) =>
+  createApiKey: (api: Api, scope: Scope, environment: string, body: { name: string; type?: string }) =>
     api.post<ApiKey>(`${environmentPath(scope, environment)}/api-keys`, { organization: scope.organization, body }),
 
   revokeApiKey: (api: Api, scope: Scope, environment: string, id: string) =>

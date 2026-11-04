@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { confirmAction, type Context, type GlobalFlags } from '../../context';
+import { CliError } from '../../errors';
 import type { Example } from '../../examples';
 import { createOutput } from '../../output';
 import { buildProgram } from '../../program';
@@ -204,14 +205,29 @@ describe('functions new', () => {
     });
   });
 
-  it.each(['My_Function', 'me', 'a'.repeat(51)])('rejects slugs the platform would refuse: %s', async (slug) => {
+  it.each(['../escape', 'a/b', '..'])('refuses a slug that is not a single folder: %s', async (slug) => {
     const cli = await harness();
     await cli.run('init');
 
-    await expect(cli.run('functions', 'new', slug)).rejects.toMatchObject({
-      message: `${slug} is not a valid function slug.`,
-      hint: 'Use 3 to 50 lowercase letters, numbers and dashes, such as send-email.',
-    });
+    await expect(cli.run('functions', 'new', slug)).rejects.toMatchObject({ message: `${slug} cannot be a folder name.` });
+  });
+
+  it('leaves the slug rules to the platform, which checks them on deploy', async () => {
+    const cli = await harness();
+    await cli.run('init');
+
+    await cli.run('functions', 'new', 'me');
+
+    await expect(stat(join(cli.cwd, 'nulvless/functions/me/index.ts'))).resolves.toBeDefined();
+  });
+
+  it('says which function the platform refused on deploy', async () => {
+    const cli = await harness();
+    await cli.run('init');
+    await cli.run('functions', 'new', 'me');
+    cli.api.post.mockRejectedValueOnce(new CliError('Invalid function slug.'));
+
+    await expect(cli.run('functions', 'deploy', 'me')).rejects.toMatchObject({ message: 'me: Invalid function slug.' });
   });
 
   it('never overwrites an existing function', async () => {
@@ -463,6 +479,16 @@ describe('templates push', () => {
     expect(cli.api.get).toHaveBeenCalledWith('/projects/shop/staging/templates', {
       organization: 'acme',
       query: { source: 'project', page: 1, page_size: 100 },
+    });
+  });
+
+  it('says which template the API refused, with its own message and hint', async () => {
+    const cli = await withTemplates();
+    cli.api.post.mockRejectedValueOnce(new CliError('Invalid name.', { hint: 'Check the template.' }));
+
+    await expect(cli.run('templates', 'push', 'order-shipped', '--env', 'staging')).rejects.toMatchObject({
+      message: 'order-shipped (en-US): Invalid name.',
+      hint: 'Check the template.',
     });
   });
 

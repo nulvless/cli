@@ -3,7 +3,7 @@ import type { Command } from 'commander';
 import type { Api } from '../api/http';
 import { resources, type Scope } from '../api/resources';
 import type { ContextFactory } from '../context';
-import { CliError } from '../errors';
+import { CliError, forItem } from '../errors';
 import { deploymentFilters, withDeploymentFilters, type DeploymentFilterFlags } from './deployments';
 import { downloadExample, fetchCatalog, findExample } from '../examples';
 import { EVERY_PAGE, notePage, pageRequest, withPageOptions, type PageFlags, type PageRequest } from '../pagination';
@@ -11,7 +11,7 @@ import { examples } from '../ui/help';
 import { statusTone } from '../ui/style';
 import {
   findWorkspace,
-  FUNCTION_SLUG,
+  assertFolderName,
   functionSlugs,
   FUNCTIONS_DIR,
   pathExists,
@@ -71,11 +71,7 @@ export function registerFunctionCommands(program: Command, context: ContextFacto
 
       const root = await findWorkspace(cwd);
       if (!root) throw NO_WORKSPACE();
-      if (!FUNCTION_SLUG.test(slug)) {
-        throw new CliError(`${slug} is not a valid function slug.`, {
-          hint: 'Use 3 to 50 lowercase letters, numbers and dashes, such as send-email.',
-        });
-      }
+      assertFolderName(slug);
 
       const path = `${WORKSPACE_DIR}/${FUNCTIONS_DIR}/${slug}`;
       const target = join(root, path);
@@ -130,10 +126,13 @@ export function registerFunctionCommands(program: Command, context: ContextFacto
       for (const slug of selected) {
         const files = sources.get(slug) ?? [];
         const action = existing.has(slug) ? 'updated' : 'created';
-        const deployed = await output.task(`Deploying ${slug}`, () =>
-          action === 'updated'
-            ? resources.updateFunction(api, target, slug, deployForm(files, {}))
-            : resources.createFunction(api, target, deployForm(files, { slug, name: declared[slug]?.name ?? slug })),
+        const deployed = await forItem(
+          slug,
+          output.task(`Deploying ${slug}`, () =>
+            action === 'updated'
+              ? resources.updateFunction(api, target, slug, deployForm(files, {}))
+              : resources.createFunction(api, target, deployForm(files, { slug, name: declared[slug]?.name ?? slug })),
+          ),
         );
         results.push({ slug, action, version: deployed.short_version });
         if (!output.json) output.success(`${action === 'created' ? 'Created' : 'Updated'} ${slug} (${deployed.short_version}).`);
@@ -166,7 +165,7 @@ export function registerFunctionCommands(program: Command, context: ContextFacto
 
       const pulled = [];
       for (const slug of selected) {
-        const { files } = await output.task(`Pulling ${slug}`, () => resources.functionSource(api, target, slug));
+        const { files } = await forItem(slug, output.task(`Pulling ${slug}`, () => resources.functionSource(api, target, slug)));
         const path = `${WORKSPACE_DIR}/${FUNCTIONS_DIR}/${slug}`;
         await writeFiles(join(root, path), files);
         pulled.push({ slug, path, files: files.map((file) => file.path) });

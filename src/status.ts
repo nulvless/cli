@@ -181,7 +181,7 @@ function issueOf(issue: OverviewIssue, env: string, inConsole: (path: string) =>
 }
 
 const STEPS: Record<OverviewStepCode, { title: string; fix: (env: string, inConsole: (path: string) => StatusFix) => StatusFix }> = {
-  api_key: { title: 'Create an API key', fix: (env) => ({ command: `nulvless keys create Server --type private${env}` }) },
+  api_key: { title: 'Create an API key', fix: (env) => ({ command: `nulvless keys create server --type private${env}` }) },
   sign_in: { title: 'Choose how users sign in', fix: (_env, inConsole) => inConsole('auth/signins') },
   email_provider: { title: 'Set up email sending', fix: (_env, inConsole) => inConsole('communications/settings') },
   first_function: { title: 'Create your first function', fix: () => ({ command: 'nulvless functions new hello' }) },

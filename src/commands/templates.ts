@@ -3,13 +3,12 @@ import { Option, type Command } from 'commander';
 import type { Api } from '../api/http';
 import { resources, type ListedTemplate, type PlatformTemplate, type Scope, type TemplateBody } from '../api/resources';
 import type { ContextFactory } from '../context';
-import { CliError } from '../errors';
+import { CliError, forItem } from '../errors';
 import { downloadExample, fetchCatalog, findExample } from '../examples';
 import {
   readTemplates,
   starterTemplate,
   TEMPLATE_CHANNELS,
-  TEMPLATE_SLUG,
   templateFilesFor,
   templatePath,
   workspaceTemplatesOf,
@@ -18,7 +17,7 @@ import {
   type TemplateChannel,
 } from '../templates';
 import { examples } from '../ui/help';
-import { findWorkspace, pathExists, writeFiles } from '../workspace';
+import { assertFolderName, findWorkspace, pathExists, writeFiles } from '../workspace';
 
 const PRODUCTION_ENVIRONMENT = 'main';
 
@@ -125,11 +124,7 @@ export function registerTemplateCommands(program: Command, context: ContextFacto
       const { cwd, fetch, platform, output } = await context(command.optsWithGlobals());
 
       const root = await requireWorkspace(cwd);
-      if (!TEMPLATE_SLUG.test(slug)) {
-        throw new CliError(`${slug} is not a valid template slug.`, {
-          hint: 'Use lowercase letters, numbers and dashes, such as order-shipped.',
-        });
-      }
+      assertFolderName(slug);
 
       const example = options.template
         ? await output.task(`Downloading ${options.template}`, async () => {
@@ -200,10 +195,13 @@ export function registerTemplateCommands(program: Command, context: ContextFacto
           };
           const action = existing.has(`${key.channel}/${key.slug}/${key.language}`) ? 'updated' : 'created';
 
-          await output.task(`Pushing ${key.slug} (${key.language})`, () =>
-            action === 'updated'
-              ? resources.updateTemplate(api, target, env, key, content)
-              : resources.createTemplate(api, target, env, { ...key, ...content }),
+          await forItem(
+            `${key.slug} (${key.language})`,
+            output.task(`Pushing ${key.slug} (${key.language})`, () =>
+              action === 'updated'
+                ? resources.updateTemplate(api, target, env, key, content)
+                : resources.createTemplate(api, target, env, { ...key, ...content }),
+            ),
           );
           results.push({ ...key, action });
           if (!output.json) output.success(`${action === 'created' ? 'Created' : 'Updated'} ${key.slug} (${key.language}) in ${env}.`);

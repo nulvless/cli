@@ -3,9 +3,6 @@ import type { ContextFactory } from '../context';
 import { CliError } from '../errors';
 import { examples } from '../ui/help';
 
-const MIN_LENGTH = 5;
-const MAX_LENGTH = 2000;
-
 export function registerFeedbackCommand(program: Command, context: ContextFactory, version: string) {
   program
     .command('feedback')
@@ -19,8 +16,6 @@ export function registerFeedbackCommand(program: Command, context: ContextFactor
         throw new CliError('Write your feedback.', { hint: 'Pass it as an argument: nulvless feedback "your message"' });
       }
       const feedback = (words.length ? words.join(' ') : await prompter.text('What would you like to tell us?')).trim();
-      if (feedback.length < MIN_LENGTH) throw new CliError(`Write at least ${MIN_LENGTH} characters.`);
-      if (feedback.length > MAX_LENGTH) throw new CliError(`Keep it under ${MAX_LENGTH} characters.`);
 
       await output.task('Sending your feedback', () =>
         api.post('/organizations/feedback', { body: { feedback, path: `cli/${version}` } }),

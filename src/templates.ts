@@ -9,7 +9,6 @@ export type TemplateChannel = 'email' | 'sms';
 export type TemplateLanguage = 'en-US' | 'pt-BR';
 
 export const TEMPLATES_PATH = `${WORKSPACE_DIR}/${TEMPLATES_DIR}`;
-export const TEMPLATE_SLUG = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 export const TEMPLATE_CHANNELS: TemplateChannel[] = ['email', 'sms'];
 
 const SETTINGS_FILE = 'template.json';

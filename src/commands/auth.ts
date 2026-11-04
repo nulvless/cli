@@ -66,7 +66,7 @@ export function registerAuthCommands(program: Command, context: ContextFactory) 
   program
     .command('sudo')
     .description('Confirm it is you so protected actions run without asking, for a few minutes')
-    .addHelpText('after', examples(['nulvless sudo', 'nulvless sudo && nulvless keys create ci --yes']))
+    .addHelpText('after', examples(['nulvless sudo', 'nulvless sudo && nulvless keys create ci-deploy --type private --yes']))
     .action(async (_options, command: Command) => {
       const { elevate, output } = await context(command.optsWithGlobals());
 

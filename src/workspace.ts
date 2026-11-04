@@ -9,7 +9,6 @@ export const CONFIG_FILE = 'nulvless.jsonc';
 export const FUNCTIONS_DIR = 'functions';
 export const TEMPLATES_DIR = 'templates';
 export const WORKSPACE_SCHEMA_URL = 'https://cdn.jsdelivr.net/npm/@nulvless/cli/schema/workspace.schema.json';
-export const FUNCTION_SLUG = /^(?=.{3,50}$)[a-z0-9]+(-[a-z0-9]+)*$/;
 
 const CONFIG_PATH = `${WORKSPACE_DIR}/${CONFIG_FILE}`;
 const FUNCTIONS_PATH = `${WORKSPACE_DIR}/${FUNCTIONS_DIR}`;
@@ -48,6 +47,12 @@ export async function pathExists(path: string) {
 function renderConfig(link: WorkspaceLink) {
   const config = { $schema: WORKSPACE_SCHEMA_URL, ...link, functions: {} };
   return `${JSON.stringify(config, null, 2)}\n`;
+}
+
+export function assertFolderName(name: string) {
+  if (!name || name === '.' || name === '..' || /[\\/]/.test(name)) {
+    throw new CliError(`${name} cannot be a folder name.`, { hint: 'Use a name without slashes, such as send-email.' });
+  }
 }
 
 export async function initWorkspace(root: string, link: WorkspaceLink) {

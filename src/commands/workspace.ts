@@ -4,7 +4,7 @@ import { Option, type Command } from 'commander';
 import { resources } from '../api/resources';
 import type { ContextFactory, GlobalFlags } from '../context';
 import { environmentOption } from '../environment-option';
-import { CliError } from '../errors';
+import { CliError, forItem } from '../errors';
 import { downloadExample, fetchCatalog, findExample, type ExampleKind } from '../examples';
 import { templatePath, workspaceTemplatesOf, writeTemplate } from '../templates';
 import { ownTemplates } from './templates';
@@ -90,7 +90,7 @@ export function registerWorkspaceCommands(program: Command, context: ContextFact
 
       const pulledFunctions = [];
       for (const { slug, path } of functionPaths) {
-        const { files } = await output.task(`Pulling ${slug}`, () => resources.functionSource(api, target, slug));
+        const { files } = await forItem(slug, output.task(`Pulling ${slug}`, () => resources.functionSource(api, target, slug)));
         await writeFiles(join(root, path), files);
         pulledFunctions.push({ slug, path, files: files.map((file) => file.path) });
       }

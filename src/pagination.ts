@@ -26,20 +26,16 @@ export interface PageFlags {
 
 export const EVERY_PAGE: PageRequest = { page: 1, limit: MAX_PAGE_SIZE, sort: 'desc', all: true };
 
-function wholeNumberUpTo(max: number) {
-  return (value: string) => {
-    const number = Number(value);
-    if (!Number.isInteger(number) || number < 1 || number > max) {
-      throw new InvalidArgumentError(`Use a whole number from 1 to ${max}.`);
-    }
-    return number;
-  };
+function wholeNumber(value: string) {
+  const number = Number(value);
+  if (!Number.isInteger(number) || number < 1) throw new InvalidArgumentError('Use a whole number, 1 or more.');
+  return number;
 }
 
 export function withPageOptions(command: Command) {
   return command
-    .option('--limit <count>', `how many to show per page, up to ${MAX_PAGE_SIZE}`, wholeNumberUpTo(MAX_PAGE_SIZE), DEFAULT_LIMIT)
-    .option('--page <number>', 'which page to show', wholeNumberUpTo(Number.MAX_SAFE_INTEGER), 1)
+    .option('--limit <count>', 'how many to show per page', wholeNumber, DEFAULT_LIMIT)
+    .option('--page <number>', 'which page to show', wholeNumber, 1)
     .option('--all', 'show every page')
     .option('--oldest-first', 'start from the oldest');
 }

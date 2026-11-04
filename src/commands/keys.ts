@@ -1,7 +1,6 @@
 import { Option, type Command } from 'commander';
 import { resources } from '../api/resources';
 import type { ContextFactory } from '../context';
-import { CliError } from '../errors';
 import { environmentLabel, environmentOption } from '../environment-option';
 import { examples } from '../ui/help';
 import { statusTone } from '../ui/style';
@@ -45,7 +44,7 @@ export function registerKeyCommands(program: Command, context: ContextFactory) {
     .description('Manage the API keys of an environment')
     .addHelpText(
       'after',
-      examples(['nulvless keys list', 'nulvless keys create CI --type private --env staging', 'nulvless keys revoke key_123']),
+      examples(['nulvless keys list', 'nulvless keys create ci-deploy --type private --env staging', 'nulvless keys revoke key_123']),
     );
 
   keys
@@ -81,16 +80,9 @@ export function registerKeyCommands(program: Command, context: ContextFactory) {
     .action(async (name: string, options: EnvironmentFlag & { type?: string }, command: Command) => {
       const { api, scope, output } = await context(command.optsWithGlobals());
 
-      const type = options.type;
-      if (!type) {
-        throw new CliError('Choose the key type.', {
-          hint: 'Pass --type public for browsers and apps, or --type private for servers.',
-        });
-      }
-
       const target = await scope();
       const key = await output.task(`Creating ${name} in ${options.env}`, () =>
-        resources.createApiKey(api, target, options.env, { name, type }),
+        resources.createApiKey(api, target, options.env, { name, ...(options.type ? { type: options.type } : {}) }),
       );
 
       if (output.json) return output.data(key);

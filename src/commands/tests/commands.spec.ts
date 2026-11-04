@@ -165,11 +165,13 @@ describe('secrets set', () => {
     expect(cli.api.post.mock.calls[0]?.[1]).toMatchObject({ body: { key: 'STRIPE_KEY', value: 'typed-secret' } });
   });
 
-  it('rejects reserved names before calling the API', async () => {
+  it('shows the API refusal for a reserved name', async () => {
     const cli = harness();
+    cli.api.post.mockRejectedValueOnce(new CliError('This secret name is reserved.'));
 
-    await expect(cli.run('secrets', 'set', 'NULVLESS_URL=x', '-f', 'checkout')).rejects.toBeInstanceOf(CliError);
-    expect(cli.api.post).not.toHaveBeenCalled();
+    await expect(cli.run('secrets', 'set', 'NULVLESS_URL=x', '-f', 'checkout')).rejects.toMatchObject({
+      message: 'This secret name is reserved.',
+    });
   });
 
   it('needs the value inline when it cannot ask', async () => {
@@ -643,12 +645,6 @@ describe('keys', () => {
     expect(cli.stderr.join('')).toContain('shown only once');
   });
 
-  it('needs the key type', async () => {
-    const cli = harness({ routes: keyRoutes });
-
-    await expect(cli.run('keys', 'create', 'CI')).rejects.toMatchObject({ message: 'Choose the key type.' });
-  });
-
   it('revokes a key after confirming', async () => {
     const cli = harness({ routes: keyRoutes });
 
@@ -775,12 +771,16 @@ describe('oauth', () => {
     expect(cli.stderr.join('')).toContain('shown only once');
   });
 
-  it('needs at least one redirect URI', async () => {
+  it('leaves the redirect URI rules to the API', async () => {
     const cli = harness({ routes: oauthRoutes });
+    cli.api.post.mockResolvedValueOnce({ client_id: 'cli_3', client_type: 'public' });
 
-    await expect(cli.run('oauth', 'clients', 'create', 'Acme', '--type', 'public')).rejects.toMatchObject({
-      message: 'Add at least one redirect URI.',
-    });
+    await cli.run('oauth', 'clients', 'create', 'Acme', '--type', 'public');
+
+    expect(cli.api.post).toHaveBeenCalledWith(
+      '/projects/shop/main/oauth/clients',
+      expect.objectContaining({ body: expect.objectContaining({ redirect_uris: [] }) }),
+    );
   });
 
   it('updates a client keeping what was not passed', async () => {
@@ -1255,13 +1255,11 @@ describe('feedback', () => {
     await expect(cli.run('feedback')).rejects.toMatchObject({ message: 'Write your feedback.' });
   });
 
-  it.each([
-    ['ok', 'Write at least 5 characters.'],
-    ['x'.repeat(2001), 'Keep it under 2000 characters.'],
-  ])('refuses %s before sending it', async (message, error) => {
+  it('leaves the length rules to the API', async () => {
     const cli = harness();
 
-    await expect(cli.run('feedback', message)).rejects.toMatchObject({ message: error });
-    expect(cli.api.post).not.toHaveBeenCalled();
+    await cli.run('feedback', 'ok');
+
+    expect(cli.api.post).toHaveBeenCalledWith('/organizations/feedback', { body: { feedback: 'ok', path: 'cli/0.0.0' } });
   });
 });

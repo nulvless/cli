@@ -5,7 +5,7 @@ import { resources } from '../api/resources';
 import type { ContextFactory } from '../context';
 import { examples } from '../ui/help';
 import { CliError } from '../errors';
-import { assertSecretKey, parseAssignment } from '../secret-key';
+import { parseAssignment } from '../secret-key';
 import { findWorkspace, FUNCTIONS_DIR, pathExists, WORKSPACE_DIR } from '../workspace';
 
 const LOCAL_ENV_FILE = '.env.local';
@@ -128,7 +128,6 @@ export function registerSecretCommands(program: Command, context: ContextFactory
     .action(async (key: string, options: FunctionOption, command: Command) => {
       const { api, scope, output, confirm } = await context(command.optsWithGlobals());
 
-      assertSecretKey(key);
       const target = await scope();
       await confirm(`Remove ${key} from ${options.function}? The function is redeployed without it.`);
       await output.task(`Removing ${key}`, () => resources.unsetSecret(api, target, options.function, key));

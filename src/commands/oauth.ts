@@ -191,9 +191,6 @@ export function registerOAuthCommands(program: Command, context: ContextFactory)
         hint: 'Pass --type public for browser and mobile apps, or --type confidential for servers.',
       });
     }
-    if (!options.redirectUri?.length) {
-      throw new CliError('Add at least one redirect URI.', { hint: 'Pass --redirect-uri <uri>; it must match exactly.' });
-    }
 
     const target = await scope();
     const client = await output.task(`Registering ${name}`, () =>
@@ -201,7 +198,7 @@ export function registerOAuthCommands(program: Command, context: ContextFactory)
         client_name: name,
         client_type: options.type,
         token_endpoint_auth_method: AUTH_METHOD[options.type!],
-        redirect_uris: options.redirectUri,
+        redirect_uris: options.redirectUri ?? [],
         grant_types: grantTypes(options.refreshTokens),
         ...(options.clientUri ? { client_uri: options.clientUri } : {}),
         ...(options.logoUri ? { logo_uri: options.logoUri } : {}),

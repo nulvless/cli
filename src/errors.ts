@@ -84,3 +84,12 @@ export class SignInError extends CliError {
     super(message, { hint: 'Run `nulvless login` to try again.' });
   }
 }
+
+export async function forItem<T>(label: string, request: Promise<T>): Promise<T> {
+  try {
+    return await request;
+  } catch (error) {
+    if (!(error instanceof CliError)) throw error;
+    throw new CliError(`${label}: ${error.message}`, { exitCode: error.exitCode, ...(error.hint ? { hint: error.hint } : {}) });
+  }
+}

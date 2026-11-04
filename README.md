@@ -170,7 +170,7 @@ run without asking.
 
 ```bash
 nulvless sudo                          # confirm now, before a batch of actions
-nulvless keys create CI --type private --env staging
+nulvless keys create ci-deploy --type private --env staging
 ```
 
 Outside a terminal there is nothing to type the code into, so protected actions
