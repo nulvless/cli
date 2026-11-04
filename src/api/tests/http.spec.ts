@@ -31,6 +31,19 @@ describe('createApi', () => {
     expect(init.headers).toMatchObject({ 'Content-Type': 'application/json' });
   });
 
+  it('sends forms as multipart without forcing a content type', async () => {
+    const fetchImpl = jest.fn(async () => jsonResponse(200, { slug: 'hello' }));
+    const form = new FormData();
+    form.append('slug', 'hello');
+
+    await apiWith(fetchImpl).put('/projects/shop/functions/hello', { form });
+
+    const [, init] = fetchImpl.mock.calls[0] as unknown as [URL, RequestInit];
+    expect(init.method).toBe('PUT');
+    expect(init.body).toBe(form);
+    expect(init.headers).not.toHaveProperty('Content-Type');
+  });
+
   it('turns 401 into an expired session', async () => {
     const api = apiWith(jest.fn(async () => jsonResponse(401, { message: 'Unauthorized' })));
 

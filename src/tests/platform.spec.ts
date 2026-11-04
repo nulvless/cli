@@ -15,6 +15,8 @@ describe('platformFrom', () => {
   it('opens the console at cloud.nulvless.com unless told otherwise', () => {
     expect(platformFrom({}).consoleUrl).toBe('https://cloud.nulvless.com');
     expect(platformFrom({ NULVLESS_CONSOLE_URL: 'http://localhost:5173' }).consoleUrl).toBe('http://localhost:5173');
+    expect(platformFrom({}).examplesUrl).toBe('https://raw.githubusercontent.com/nulvless/examples/main');
+    expect(platformFrom({ NULVLESS_EXAMPLES_URL: 'http://localhost:8080' }).examplesUrl).toBe('http://localhost:8080');
   });
 
   it('builds loopback callback URLs', () => {

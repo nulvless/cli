@@ -4,12 +4,14 @@ import type { Scope } from './api/resources';
 import { refreshWith } from './auth/login';
 import { defaultCredentialStore, type CredentialStore } from './credentials/credential-store';
 import { accessToken } from './credentials/session';
+import type { FetchText } from './examples';
 import { CancelledError, CliError, SessionExpiredError, TokenRejectedError } from './errors';
 import { createOutput, type Output } from './output';
 import { platformFrom, type Platform } from './platform';
 import { resolveScope } from './scope';
 import { isInteractive, terminalPrompter, type Prompter } from './ui/prompter';
 import { supportsHyperlinks } from './ui/style';
+import { findWorkspace, readWorkspaceConfig } from './workspace';
 
 export interface GlobalFlags {
   org?: string;
@@ -20,6 +22,8 @@ export interface GlobalFlags {
 
 export interface Context {
   env: NodeJS.ProcessEnv;
+  cwd: string;
+  fetch: FetchText;
   platform: Platform;
   output: Output;
   prompter: Prompter;
@@ -40,6 +44,7 @@ export async function confirmAction(flags: GlobalFlags, prompter: Prompter, mess
 
 export const createContext: ContextFactory = async (flags) => {
   const env = process.env;
+  const cwd = process.cwd();
   const platform = platformFrom(env);
   const store = await defaultCredentialStore(env);
   const prompter = terminalPrompter(isInteractive(env));
@@ -57,6 +62,8 @@ export const createContext: ContextFactory = async (flags) => {
 
   return {
     env,
+    cwd,
+    fetch: (url) => fetch(url),
     platform,
     output,
     prompter,
@@ -64,7 +71,9 @@ export const createContext: ContextFactory = async (flags) => {
     api,
     token,
     scope: async () => {
-      const scope = await resolveScope({ flags, env, api, prompter });
+      const workspace = await findWorkspace(cwd);
+      const linked = workspace ? await readWorkspaceConfig(workspace) : {};
+      const scope = await resolveScope({ flags, env, linked, api, prompter });
       output.step(`Project ${pc.bold(scope.project)} ${pc.dim(`in ${scope.organization}`)}`);
       return scope;
     },

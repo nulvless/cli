@@ -1,6 +1,6 @@
 {
   "name": "@nulvless/cli",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Command line interface for Nulvless",
   "type": "module",
   "license": "MIT",
@@ -28,6 +28,7 @@
   },
   "files": [
     "dist",
+    "schema",
     "LICENSE",
     "README.md"
   ],
@@ -46,6 +47,7 @@
     "@napi-rs/keyring": "^1.3.0",
     "@nulvless/nulvless-js": "^0.1.6",
     "commander": "^14.0.3",
+    "jsonc-parser": "^3.3.1",
     "open": "^10.2.0",
     "picocolors": "^1.1.1"
   },

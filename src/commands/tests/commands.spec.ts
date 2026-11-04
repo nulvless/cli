@@ -261,8 +261,9 @@ describe('functions deployments', () => {
   it('lists the deployments of a function', async () => {
     const cli = harness({
       routes: {
+        '/projects/shop/functions/checkout': { slug: 'checkout', version: 'ver-3' },
         '/projects/shop/functions/checkout/deployments': {
-          items: [{ id: 'dep_1', short_version: 'v3', trigger: 'secret_change', status: 'succeeded', created_by: null, created_at: '2026-11-03T12:00:00.000Z' }],
+          items: [{ id: 'dep_1', version: 'ver-3', short_version: 'v3', trigger: 'secret_change', status: 'succeeded', created_by: null, created_at: '2026-11-03T12:00:00.000Z' }],
           total: 1,
         },
       },
@@ -271,6 +272,134 @@ describe('functions deployments', () => {
     await cli.run('functions', 'deployments', 'checkout');
 
     expect(cli.stdout.join('')).toContain('dep_1');
+  });
+});
+
+const checkoutHistory = {
+  '/projects/shop/functions/checkout': { slug: 'checkout', version: 'ver-3', short_version: 'v3' },
+  '/projects/shop/functions/checkout/deployments': {
+    items: [
+      { id: 'dep_3', version: 'ver-3', short_version: 'v3', trigger: 'deploy', status: 'succeeded', created_by: null, created_at: '2026-11-04T12:00:00.000Z', promote_available: false },
+      { id: 'dep_2', version: 'ver-2', short_version: 'v2', trigger: 'deploy', status: 'succeeded', created_by: null, created_at: '2026-11-03T12:00:00.000Z', promote_available: true },
+      { id: 'dep_1', version: 'ver-1', short_version: 'v1', trigger: 'deploy', status: 'failed', created_by: null, created_at: '2026-11-02T12:00:00.000Z', promote_available: false },
+    ],
+    total: 3,
+  },
+};
+
+describe('functions deployments marks versions', () => {
+  it('shows which version is live and which can be promoted', async () => {
+    const cli = harness({ routes: checkoutHistory });
+
+    await cli.run('functions', 'deployments', 'checkout');
+
+    const lines = cli.stdout.join('').split('\n');
+    expect(lines.find((line) => line.includes('dep_3'))).toContain('live');
+    expect(lines.find((line) => line.includes('dep_2'))).toContain('yes');
+    expect(lines.find((line) => line.includes('dep_1'))).not.toContain('yes');
+  });
+
+  it('adds live to the JSON', async () => {
+    const cli = harness({ routes: checkoutHistory });
+
+    await cli.run('functions', 'deployments', 'checkout', '--json');
+
+    const rows = JSON.parse(cli.stdout.join(''));
+    expect(rows.map((row: { id: string; live: boolean }) => [row.id, row.live])).toEqual([
+      ['dep_3', true],
+      ['dep_2', false],
+      ['dep_1', false],
+    ]);
+  });
+});
+
+describe('functions promote', () => {
+  it('promotes a deployment by its short version', async () => {
+    const cli = harness({ routes: checkoutHistory });
+
+    await cli.run('functions', 'promote', 'checkout', 'v2', '--yes');
+
+    expect(cli.api.post).toHaveBeenCalledWith('/projects/shop/functions/checkout/deployments/dep_2/promote', {
+      organization: 'acme',
+    });
+    expect(cli.stderr.join('')).toContain('checkout now serves v2.');
+  });
+
+  it('promotes a deployment by its id and prints JSON', async () => {
+    const cli = harness({ routes: checkoutHistory });
+
+    await cli.run('functions', 'promote', 'checkout', 'dep_2', '--yes', '--json');
+
+    expect(JSON.parse(cli.stdout.join(''))).toEqual({ slug: 'checkout', deployment: 'dep_2', version: 'v2' });
+  });
+
+  it('asks which version when none is given in a terminal', async () => {
+    const cli = harness({ interactive: true, routes: checkoutHistory });
+    (cli.prompter.choose as jest.Mock).mockResolvedValue('dep_2');
+
+    await cli.run('functions', 'promote', 'checkout');
+
+    const [, choices] = (cli.prompter.choose as jest.Mock).mock.calls[0];
+    expect(choices.map((choice: { value: string }) => choice.value)).toEqual(['dep_2']);
+    expect(cli.api.post).toHaveBeenCalledWith('/projects/shop/functions/checkout/deployments/dep_2/promote', {
+      organization: 'acme',
+    });
+  });
+
+  it('needs the version outside a terminal', async () => {
+    const cli = harness({ routes: checkoutHistory });
+
+    await expect(cli.run('functions', 'promote', 'checkout', '--yes')).rejects.toMatchObject({
+      message: 'No version selected.',
+      hint: 'Pass the version, such as `nulvless functions promote checkout v2`.',
+    });
+  });
+
+  it('refuses to promote without --yes when it cannot ask', async () => {
+    const cli = harness({ routes: checkoutHistory });
+
+    await expect(cli.run('functions', 'promote', 'checkout', 'v2')).rejects.toThrow(CliError);
+    expect(cli.api.post).not.toHaveBeenCalled();
+  });
+
+  it('names an unknown version', async () => {
+    const cli = harness({ routes: checkoutHistory });
+
+    await expect(cli.run('functions', 'promote', 'checkout', 'v9', '--yes')).rejects.toMatchObject({
+      message: 'checkout has no deployment v9.',
+      hint: 'Run `nulvless functions deployments checkout` to see its versions.',
+    });
+  });
+
+  it('says so when the version is already live', async () => {
+    const cli = harness({ routes: checkoutHistory });
+
+    await expect(cli.run('functions', 'promote', 'checkout', 'v3', '--yes')).rejects.toMatchObject({
+      message: 'v3 is already live.',
+    });
+  });
+
+  it('explains which versions can be promoted', async () => {
+    const cli = harness({ routes: checkoutHistory });
+
+    await expect(cli.run('functions', 'promote', 'checkout', 'v1', '--yes')).rejects.toMatchObject({
+      message: 'v1 cannot be promoted.',
+      hint: 'Only successful deploys among the last versions of a function are kept. Run `nulvless functions deployments checkout` to see which ones.',
+    });
+  });
+
+  it('says so when nothing can be promoted', async () => {
+    const cli = harness({
+      interactive: true,
+      routes: {
+        ...checkoutHistory,
+        '/projects/shop/functions/checkout/deployments': { items: [checkoutHistory['/projects/shop/functions/checkout/deployments'].items[0]], total: 1 },
+      },
+    });
+
+    await expect(cli.run('functions', 'promote', 'checkout')).rejects.toMatchObject({
+      message: 'checkout has no other version to promote.',
+    });
   });
 });
 

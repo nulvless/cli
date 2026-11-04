@@ -3,24 +3,23 @@ import { resources, type Scope } from './api/resources';
 import { CliError, MissingOptionError } from './errors';
 import { consoleUrl } from './platform';
 import type { Prompter } from './ui/prompter';
+import type { WorkspaceLink } from './workspace';
 
 export interface ScopeFlags {
   org?: string;
   project?: string;
 }
 
-export async function resolveOrganization({
-  flags,
-  env,
-  api,
-  prompter,
-}: {
+interface ScopeSources {
   flags: ScopeFlags;
   env: NodeJS.ProcessEnv;
+  linked?: WorkspaceLink;
   api: Api;
   prompter: Prompter;
-}) {
-  const explicit = flags.org ?? env.NULVLESS_ORG;
+}
+
+export async function resolveOrganization({ flags, env, linked, api, prompter }: ScopeSources) {
+  const explicit = flags.org ?? env.NULVLESS_ORG ?? linked?.organization;
   if (explicit) return explicit;
 
   const organizations = await resources.organizations(api);
@@ -35,14 +34,9 @@ export async function resolveOrganization({
   );
 }
 
-export async function resolveScope(context: {
-  flags: ScopeFlags;
-  env: NodeJS.ProcessEnv;
-  api: Api;
-  prompter: Prompter;
-}): Promise<Scope> {
+export async function resolveScope(context: ScopeSources): Promise<Scope> {
   const organization = await resolveOrganization(context);
-  const explicit = context.flags.project ?? context.env.NULVLESS_PROJECT;
+  const explicit = context.flags.project ?? context.env.NULVLESS_PROJECT ?? context.linked?.project;
   if (explicit) return { organization, project: explicit };
 
   const projects = await resources.projects(context.api, organization);

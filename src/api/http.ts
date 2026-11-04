@@ -4,11 +4,14 @@ export interface ApiRequest {
   organization?: string;
   query?: Record<string, string | number>;
   body?: unknown;
+  form?: FormData;
 }
 
 export interface Api {
   get<T>(path: string, request?: ApiRequest): Promise<T>;
   post<T>(path: string, request?: ApiRequest): Promise<T>;
+  put<T>(path: string, request?: ApiRequest): Promise<T>;
+  patch<T>(path: string, request?: ApiRequest): Promise<T>;
   delete<T>(path: string, request?: ApiRequest): Promise<T>;
 }
 
@@ -49,7 +52,7 @@ export function createApi({
   unauthorized?: () => CliError;
   fetchImpl?: typeof fetch;
 }): Api {
-  async function send<T>(method: string, path: string, { organization, query, body }: ApiRequest = {}): Promise<T> {
+  async function send<T>(method: string, path: string, { organization, query, body, form }: ApiRequest = {}): Promise<T> {
     const url = new URL(path, baseUrl);
     for (const [name, value] of Object.entries(query ?? {})) url.searchParams.set(name, String(value));
 
@@ -66,6 +69,7 @@ export function createApi({
         method,
         headers,
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+        ...(form ? { body: form } : {}),
       });
     } catch {
       throw new CliError(`Could not reach the Nulvless API at ${url.host}.`, { hint: 'Check your connection and try again.' });
@@ -81,6 +85,8 @@ export function createApi({
   return {
     get: (path, request) => send('GET', path, request),
     post: (path, request) => send('POST', path, request),
+    put: (path, request) => send('PUT', path, request),
+    patch: (path, request) => send('PATCH', path, request),
     delete: (path, request) => send('DELETE', path, request),
   };
 }

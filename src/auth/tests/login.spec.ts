@@ -18,6 +18,7 @@ const platform: Platform = {
   apiUrl: 'https://api.example.com',
   clientId: 'cli-client',
   docsUrl: 'https://www.example.com',
+  examplesUrl: 'https://examples.example.com',
   consoleUrl: 'https://cloud.example.com',
 };
 

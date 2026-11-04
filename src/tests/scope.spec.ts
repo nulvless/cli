@@ -23,6 +23,17 @@ const twoOrganizations = [
 ];
 
 describe('resolveScope', () => {
+  it('falls back to the workspace link after flags and environment variables', async () => {
+    const api = fakeApi({});
+    const linked = { organization: 'acme', project: 'shop' };
+
+    await expect(resolveScope({ flags: {}, env: {}, linked, api, prompter: fakePrompter(false) })).resolves.toEqual(linked);
+    await expect(
+      resolveScope({ flags: { project: 'cart' }, env: { NULVLESS_ORG: 'globex' }, linked, api, prompter: fakePrompter(false) }),
+    ).resolves.toEqual({ organization: 'globex', project: 'cart' });
+    expect(api.get).not.toHaveBeenCalled();
+  });
+
   it('uses flags without calling the API', async () => {
     const api = fakeApi({});
 

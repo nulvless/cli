@@ -5,6 +5,8 @@ import { registerDocsCommand } from './commands/docs';
 import { registerEnvironmentCommands } from './commands/environments';
 import { registerFunctionCommands } from './commands/functions';
 import { registerSecretCommands } from './commands/secrets';
+import { registerTemplateCommands } from './commands/templates';
+import { registerWorkspaceCommands } from './commands/workspace';
 import type { ContextFactory } from './context';
 import { renderCommanderFailure } from './ui/failure';
 import { examples } from './ui/help';
@@ -32,6 +34,9 @@ export function buildProgram(context: ContextFactory, version: string) {
       'after',
       examples([
         'nulvless login',
+        'nulvless init',
+        'nulvless functions new whoami --template verify-session',
+        'nulvless create my-app --example auth-nextjs',
         'nulvless environments list --project shop',
         'nulvless secrets set STRIPE_SECRET_KEY --function checkout',
         'nulvless functions list --json',
@@ -45,9 +50,11 @@ export function buildProgram(context: ContextFactory, version: string) {
   });
 
   registerAuthCommands(program, context);
+  registerWorkspaceCommands(program, context, version);
   registerEnvironmentCommands(program, context);
-  registerFunctionCommands(program, context);
+  registerFunctionCommands(program, context, version);
   registerSecretCommands(program, context);
+  registerTemplateCommands(program, context, version);
   registerDocsCommand(program, context);
 
   return program;

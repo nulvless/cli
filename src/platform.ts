@@ -5,6 +5,7 @@ export interface Platform {
   clientId: string;
   docsUrl: string;
   consoleUrl: string;
+  examplesUrl: string;
 }
 
 export const consoleUrl = 'https://cloud.nulvless.com';
@@ -19,6 +20,7 @@ export function platformFrom(env: NodeJS.ProcessEnv): Platform {
     clientId: env.NULVLESS_CLIENT_ID ?? NULVLESS_CLI_CLIENT_ID,
     docsUrl: env.NULVLESS_DOCS_URL ?? 'https://www.nulvless.com',
     consoleUrl: env.NULVLESS_CONSOLE_URL ?? consoleUrl,
+    examplesUrl: env.NULVLESS_EXAMPLES_URL ?? 'https://raw.githubusercontent.com/nulvless/examples/main',
   };
 }
 

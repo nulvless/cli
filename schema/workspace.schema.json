@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cdn.jsdelivr.net/npm/@nulvless/cli/schema/workspace.schema.json",
+  "title": "Nulvless workspace",
+  "description": "nulvless/nulvless.jsonc: links a repository to a Nulvless project and describes its Edge Functions.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "organization": {
+      "description": "Organization slug. Flags (--org) and NULVLESS_ORG take precedence.",
+      "type": "string"
+    },
+    "project": {
+      "description": "Project slug. Flags (--project) and NULVLESS_PROJECT take precedence.",
+      "type": "string"
+    },
+    "functions": {
+      "description": "Settings per Edge Function, keyed by the folder name in nulvless/functions.",
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "description": "Display name in the console, used when the function is created. Defaults to the slug.",
+            "type": "string"
+          },
+          "secrets": {
+            "description": "Names of the secrets the function needs. Values are never stored here.",
+            "type": "array",
+            "uniqueItems": true,
+            "items": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" }
+          }
+        }
+      }
+    }
+  }
+}

@@ -29,9 +29,10 @@ Requires Node.js 20 or later. Check the installed version with `nulvless --versi
 
 ```bash
 nulvless login                                   # sign in in the browser
-nulvless whoami                                  # account and organizations
-nulvless environments list --project shop        # environments of a project
-nulvless secrets set STRIPE_SECRET_KEY --function checkout --project shop
+nulvless init --org acme --project shop          # create nulvless/ in your repository
+nulvless functions new whoami --template verify-session
+nulvless functions deploy                        # create or update every function
+nulvless secrets set PROJECT_SECRET_KEY --function whoami
 nulvless docs quickstart                         # docs as Markdown
 ```
 
@@ -60,6 +61,80 @@ Add this to your `AGENTS.md`, `CLAUDE.md` or editor rules so your agent knows th
 Use the Nulvless CLI (`npx @nulvless/cli`) to work with Nulvless.
 Read the docs with `npx @nulvless/cli docs` and `npx @nulvless/cli docs <path>` before
 writing integration code. Always pass `--json`, plus `--org` and `--project`.
+```
+
+## Workspace
+
+`nulvless init` creates a `nulvless/` folder in your repository. It holds your
+Edge Functions as code, so they are reviewed in pull requests and deployed from
+the terminal or CI.
+
+```text
+nulvless/
+├── nulvless.jsonc        organization, project and function settings
+├── functions/
+│   ├── checkout/         one folder per function; the folder name is the slug
+│   │   ├── index.ts
+│   │   └── deno.json     optional import map (npm:, jsr:)
+│   └── _drafts/          folders starting with _ are skipped by deploy
+├── templates/
+│   ├── email/
+│   │   └── welcome-user/ one folder per template; the folder name is the slug
+│   │       ├── template.json   subject per language
+│   │       └── en-US.html
+│   └── sms/
+└── .gitignore            keeps .env.local out of git
+```
+
+```jsonc
+{
+  "$schema": "https://cdn.jsdelivr.net/npm/@nulvless/cli/schema/workspace.schema.json",
+  "organization": "acme",
+  "project": "shop",
+  "functions": {
+    "checkout": { "name": "Checkout", "secrets": ["STRIPE_SECRET_KEY"] }
+  }
+}
+```
+
+Inside a workspace, commands use its `organization` and `project`, so
+`--org` and `--project` are only needed to act on another one.
+
+`functions deploy` creates the functions that do not exist yet and updates the
+others. It never deletes one that is missing from the folder; use
+`functions delete` for that. To undo a bad deploy, `functions promote <slug>`
+serves one of the previous successful versions again, without rebuilding it;
+the current version and the three before it are kept. A function's files must sit next to its
+`index.ts`; subfolders are not supported yet.
+
+### Templates
+
+Email and SMS templates live in `nulvless/templates/email/<slug>/` and
+`nulvless/templates/sms/<slug>/`, with one file per language (`en-US.html` for
+email, `en-US.txt` for SMS). Email subjects go in a `template.json` next to
+them. Templates belong to an environment, so
+pushing and pulling always name one:
+
+```bash
+nulvless templates new welcome-user --template welcome-user   # start from the platform default
+nulvless templates push --env staging                          # create or update each language
+nulvless templates pull --env main                             # bring console changes into git
+```
+
+Using a platform slug such as `welcome-user` replaces the email Nulvless sends
+for it. Pushing to `main` asks for confirmation, or `--yes`.
+
+### Examples
+
+[`nulvless/examples`](https://github.com/nulvless/examples) holds ready-made
+functions and apps. The CLI reads its catalog on demand, so new examples need no
+CLI update.
+
+```bash
+nulvless examples                                   # list them
+nulvless functions new whoami --template verify-session # one function into the workspace
+nulvless create my-app --example auth-nextjs        # a whole new project
+nulvless examples --kind template                   # default email and SMS templates
 ```
 
 ## Authentication
@@ -101,12 +176,23 @@ nulvless login                                  sign in in the browser
 nulvless logout                                 remove the stored session
 nulvless whoami                                 account and organizations
 
+nulvless init                                   create a workspace (nulvless/) here
+nulvless create <dir> --example <name>          new project from an example app
+nulvless examples [--kind function|app]         example functions and apps
+
 nulvless environments list                      environments of the project (alias: envs)
 nulvless environments create <slug> [--name]    create an environment
 nulvless environments delete <slug>             delete an environment
 
-nulvless functions list                         Edge Functions of the project (alias: fn)
-nulvless functions deployments <slug>           deployment history of a function
+nulvless functions new <slug> [--template <name>]  new function in the workspace (alias: fn)
+nulvless functions deploy [slug...]             create or update functions from the workspace
+nulvless functions list                         Edge Functions of the project
+nulvless functions deployments <slug>           deployment history, with the live version
+nulvless functions promote <slug> [version]     serve an earlier kept version again
+
+nulvless templates new <slug> [--template]      new email or SMS template in the workspace
+nulvless templates push [slug...] --env <env>   create or update templates of an environment
+nulvless templates pull [slug...] --env <env>   write an environment's templates into the workspace
 nulvless functions delete <slug>                delete a function
 
 nulvless secrets list --function <slug>         secret names, never values
@@ -135,6 +221,7 @@ reserved by the platform and rejected before any request is sent.
 | --- | --- | --- |
 | Flag | `--org <slug>` | `--project <slug>` |
 | Environment variable | `NULVLESS_ORG` | `NULVLESS_PROJECT` |
+| Workspace | `organization` in `nulvless/nulvless.jsonc` | `project` in `nulvless/nulvless.jsonc` |
 | Automatic | the only organization of the account | — |
 | Interactive | a list to choose from | a list to choose from |
 
@@ -145,6 +232,7 @@ reserved by the platform and rejected before any request is sent.
 | `NULVLESS_TOKEN` | Access token to use instead of the stored session |
 | `NULVLESS_ORG` | Default organization |
 | `NULVLESS_PROJECT` | Default project |
+| `NULVLESS_EXAMPLES_URL` | Where to read examples from, for testing a fork of `nulvless/examples` |
 | `NO_COLOR` | Disables colors |
 | `FORCE_HYPERLINK` | `1` or `0` forces clickable links in the terminal on or off |
 
