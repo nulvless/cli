@@ -260,7 +260,8 @@ async function allPages<T>(api: Api, path: string, organization: string, filters
   for (let page = 1; ; page++) {
     const result = await api.get<Page<T>>(path, { organization, query: { ...filters, page, page_size: MAX_PAGE_SIZE } });
     items.push(...result.items);
-    if (result.items.length < MAX_PAGE_SIZE || (result.total !== undefined && items.length >= result.total)) return items;
+    const lastPage = result.total === undefined ? result.items.length < MAX_PAGE_SIZE : items.length >= result.total;
+    if (lastPage || !result.items.length) return items;
   }
 }
 

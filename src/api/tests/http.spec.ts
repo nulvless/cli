@@ -133,4 +133,37 @@ describe('resources', () => {
     expect(secondUrl.searchParams.get('page')).toBe('2');
     expect(secondUrl.searchParams.get('page_size')).toBe('100');
   });
+
+  it('keeps going when the server sends smaller pages than asked, until the total', async () => {
+    const page = (from: number) => Array.from({ length: 50 }, (_, index) => ({ slug: `fn-${from + index}` }));
+    const fetchImpl = jest
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, { items: page(0), total: 120 }))
+      .mockResolvedValueOnce(jsonResponse(200, { items: page(50), total: 120 }))
+      .mockResolvedValueOnce(jsonResponse(200, { items: page(100).slice(0, 20), total: 120 }));
+
+    const functions = await resources.functions(apiWith(fetchImpl), { organization: 'acme', project: 'shop' });
+
+    expect(functions).toHaveLength(120);
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+  });
+
+  it('stops at an empty page even if the total says otherwise', async () => {
+    const fetchImpl = jest
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, { items: [{ slug: 'fn-0' }], total: 5 }))
+      .mockResolvedValueOnce(jsonResponse(200, { items: [], total: 5 }));
+
+    const functions = await resources.functions(apiWith(fetchImpl), { organization: 'acme', project: 'shop' });
+
+    expect(functions).toHaveLength(1);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it('stops at a short page when the API sends no total', async () => {
+    const fetchImpl = jest.fn().mockResolvedValueOnce(jsonResponse(200, { items: [{ slug: 'fn-0' }] }));
+
+    await expect(resources.functions(apiWith(fetchImpl), { organization: 'acme', project: 'shop' })).resolves.toHaveLength(1);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
 });
