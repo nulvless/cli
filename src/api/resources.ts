@@ -394,7 +394,7 @@ export const resources = {
   users: (api: Api, scope: Scope, environment: string, filters: Record<string, string>, pageSize: number) =>
     api.get<Page<ProjectUser>>(usersPath(scope), {
       organization: scope.organization,
-      query: { environment, ...filters, page: 1, page_size: pageSize },
+      query: { environment, ...filters, sort: 'desc', page: 1, page_size: pageSize },
     }),
 
   user: (api: Api, scope: Scope, environment: string, id: string) =>

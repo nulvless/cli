@@ -934,7 +934,7 @@ describe('users', () => {
 
     expect(cli.api.get).toHaveBeenCalledWith('/projects/shop/users', {
       organization: 'acme',
-      query: { environment: 'main', email: 'ada@acme.com', is_banned: 'true', page: 1, page_size: 20 },
+      query: { environment: 'main', email: 'ada@acme.com', is_banned: 'true', sort: 'desc', page: 1, page_size: 20 },
     });
     expect(cli.stdout.join('')).toMatch(/usr_2\s+bob\s+no\s+yes/);
   });
