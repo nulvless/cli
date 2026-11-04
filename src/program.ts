@@ -5,6 +5,7 @@ import { registerDeploymentCommands } from './commands/deployments';
 import { registerDocsCommand } from './commands/docs';
 import { registerDoctorCommand } from './commands/doctor';
 import { registerEnvironmentCommands } from './commands/environments';
+import { registerFeedbackCommand } from './commands/feedback';
 import { registerFunctionCommands } from './commands/functions';
 import { registerKeyCommands } from './commands/keys';
 import { registerOAuthCommands } from './commands/oauth';
@@ -70,6 +71,7 @@ export function buildProgram(context: ContextFactory, version: string) {
   registerSecretCommands(program, context);
   registerTemplateCommands(program, context, version);
   registerStatusCommands(program, context);
+  registerFeedbackCommand(program, context, version);
   registerDocsCommand(program, context);
   registerDoctorCommand(program, context, version);
 

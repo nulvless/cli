@@ -18,6 +18,13 @@ export interface Api {
 interface ErrorBody {
   message?: string | string[];
   code?: string;
+  retryAfterSeconds?: number;
+}
+
+function retryHint(seconds: number | undefined) {
+  if (!seconds) return 'Wait a moment and try again.';
+  const minutes = Math.ceil(seconds / 60);
+  return `Try again in ${minutes} ${minutes === 1 ? 'minute' : 'minutes'}.`;
 }
 
 async function errorBody(response: Response): Promise<ErrorBody> {
@@ -41,6 +48,7 @@ export async function failureFrom(response: Response, unauthorized: () => CliErr
   if (response.status === 401) return unauthorized();
   if (response.status === 403 && body.code === SUDO_REQUIRED) return new SudoRequiredError();
   if (response.status === 403) return new ForbiddenError(message ?? 'You do not have permission to do this.');
+  if (response.status === 429) return new CliError(message ?? 'Too many requests.', { hint: retryHint(body.retryAfterSeconds) });
   return new CliError(message ?? `The Nulvless API answered with status ${response.status}.`);
 }
 

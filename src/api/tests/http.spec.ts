@@ -95,6 +95,15 @@ describe('createApi', () => {
     await expect(api.get('/projects')).rejects.toThrow('Slug is invalid. Name is too short.');
   });
 
+  it('says when to try again after a rate limit', async () => {
+    const api = apiWith(jest.fn(async () => jsonResponse(429, { message: 'Too many feedback submissions.', retryAfterSeconds: 130 })));
+
+    await expect(api.post('/organizations/feedback')).rejects.toMatchObject({
+      message: 'Too many feedback submissions.',
+      hint: 'Try again in 3 minutes.',
+    });
+  });
+
   it('explains when the API cannot be reached', async () => {
     const api = apiWith(
       jest.fn(async () => {

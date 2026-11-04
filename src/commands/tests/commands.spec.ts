@@ -1210,3 +1210,43 @@ describe('status', () => {
     await expect(cli.run('status', '--watch', '--json')).rejects.toMatchObject({ message: 'status --watch needs a terminal.' });
   });
 });
+
+describe('feedback', () => {
+  it('sends the message, saying it came from the CLI and its version', async () => {
+    const cli = harness();
+
+    await cli.run('feedback', 'Deploys', 'are', 'great');
+
+    expect(cli.api.post).toHaveBeenCalledWith('/organizations/feedback', {
+      body: { feedback: 'Deploys are great', path: 'cli/0.0.0' },
+    });
+    expect(cli.stderr.join('')).toContain('Thanks, your feedback was sent.');
+  });
+
+  it('asks for the message in a terminal', async () => {
+    const cli = harness({ interactive: true });
+    (cli.prompter.text as jest.Mock).mockResolvedValueOnce('The status command helps a lot');
+
+    await cli.run('feedback');
+
+    expect(cli.api.post).toHaveBeenCalledWith('/organizations/feedback', {
+      body: { feedback: 'The status command helps a lot', path: 'cli/0.0.0' },
+    });
+  });
+
+  it('needs the message outside a terminal', async () => {
+    const cli = harness();
+
+    await expect(cli.run('feedback')).rejects.toMatchObject({ message: 'Write your feedback.' });
+  });
+
+  it.each([
+    ['ok', 'Write at least 5 characters.'],
+    ['x'.repeat(2001), 'Keep it under 2000 characters.'],
+  ])('refuses %s before sending it', async (message, error) => {
+    const cli = harness();
+
+    await expect(cli.run('feedback', message)).rejects.toMatchObject({ message: error });
+    expect(cli.api.post).not.toHaveBeenCalled();
+  });
+});
