@@ -2,8 +2,38 @@ import { Option, type Command } from 'commander';
 import { resources, type Deployment, type PipelineStep } from '../api/resources';
 import type { ContextFactory } from '../context';
 import { formatDuration } from '../output';
+import { notePage, pageRequest, withPageOptions, type PageFlags } from '../pagination';
 import { examples } from '../ui/help';
 import { statusTone } from '../ui/style';
+
+export interface DeploymentFilterFlags {
+  versionContains?: string;
+  trigger?: string;
+  status?: string;
+}
+
+export function withDeploymentFilters(command: Command) {
+  return command
+    .option('--version-contains <text>', 'only versions that contain this text, such as v3')
+    .option('--trigger <trigger>', 'only deployments started this way, such as deploy or secret_change')
+    .addOption(
+      new Option('--status <status>', 'only deployments in this status').choices([
+        'queued',
+        'running',
+        'succeeded',
+        'failed',
+        'cancelled',
+      ]),
+    );
+}
+
+export function deploymentFilters(options: DeploymentFilterFlags): Record<string, string> {
+  return {
+    ...(options.versionContains ? { version: options.versionContains } : {}),
+    ...(options.trigger ? { trigger: options.trigger } : {}),
+    ...(options.status ? { status: options.status } : {}),
+  };
+}
 
 function deployedTarget(deployment: Deployment) {
   const metadata = deployment.metadata ?? {};
@@ -31,35 +61,33 @@ export function registerDeploymentCommands(program: Command, context: ContextFac
       examples(['nulvless deployments list', 'nulvless deployments list --function checkout', 'nulvless deployments get dep_123']),
     );
 
-  deployments
-    .command('list')
-    .description('List the deployments of the project, newest first')
-    .option('--function <slug>', 'only the deployments of one Edge Function')
-    .addOption(new Option('--context <context>', 'only functions or only environments').choices(['functions', 'environments']))
-    .addOption(
-      new Option('--status <status>', 'only deployments in this status').choices([
-        'queued',
-        'running',
-        'succeeded',
-        'failed',
-        'cancelled',
-      ]),
-    )
-    .action(async (options: { function?: string; context?: string; status?: string }, command: Command) => {
+  withPageOptions(
+    withDeploymentFilters(
+      deployments
+        .command('list')
+        .description('List the deployments of the project, newest first')
+        .option('--function <slug>', 'only the deployments of one Edge Function')
+        .addOption(
+          new Option('--context <context>', 'only functions or only environments').choices(['functions', 'environments']),
+        ),
+    ),
+  ).action(
+    async (options: DeploymentFilterFlags & PageFlags & { function?: string; context?: string }, command: Command) => {
       const { api, scope, output } = await context(command.optsWithGlobals());
 
+      const request = pageRequest(options, command);
       const target = await scope();
-      const rows = await output.task('Loading deployments', async () => {
+      const page = await output.task('Loading deployments', async () => {
         const fn = options.function ? await resources.function(api, target, options.function) : null;
         const filters: Record<string, string> = {
           ...(fn ? { context: 'functions', scope: String(fn.id) } : options.context ? { context: options.context } : {}),
-          ...(options.status ? { status: options.status } : {}),
+          ...deploymentFilters(options),
         };
-        return resources.projectDeployments(api, target, filters);
+        return resources.projectDeployments(api, target, filters, request);
       });
 
       output.table(
-        rows,
+        page.items,
         [
           { header: 'ID', value: (deployment) => deployment.id },
           { header: 'KIND', value: (deployment) => deployment.context ?? '' },
@@ -71,7 +99,9 @@ export function registerDeploymentCommands(program: Command, context: ContextFac
         ],
         { message: `No deployments in ${target.project} yet.` },
       );
-    });
+      notePage(output, page, request);
+    },
+  );
 
   deployments
     .command('get')

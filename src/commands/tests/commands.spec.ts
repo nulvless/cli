@@ -93,6 +93,17 @@ describe('functions list', () => {
     expect(JSON.parse(cli.stdout.join(''))).toEqual(functionsPage.items);
   });
 
+  it('searches by name or slug', async () => {
+    const cli = harness({ routes: { '/projects/shop/functions': functionsPage } });
+
+    await cli.run('functions', 'list', '--search', 'check');
+
+    expect(cli.api.get).toHaveBeenCalledWith('/projects/shop/functions', {
+      organization: 'acme',
+      query: { search: 'check', page: 1, page_size: 100 },
+    });
+  });
+
   it('says so when there are none', async () => {
     const cli = harness({ routes: { '/projects/shop/functions': { items: [], total: 0 } } });
 
@@ -306,6 +317,17 @@ describe('functions deployments marks versions', () => {
     expect(lines.find((line) => line.includes('dep_1'))).not.toContain('yes');
   });
 
+  it('pages through the history and filters it', async () => {
+    const cli = harness({ routes: checkoutHistory });
+
+    await cli.run('functions', 'deployments', 'checkout', '--status', 'failed', '--limit', '5', '--page', '2');
+
+    expect(cli.api.get).toHaveBeenCalledWith('/projects/shop/functions/checkout/deployments', {
+      organization: 'acme',
+      query: { status: 'failed', sort: 'desc', page: 2, page_size: 5 },
+    });
+  });
+
   it('adds live to the JSON', async () => {
     const cli = harness({ routes: checkoutHistory });
 
@@ -453,7 +475,52 @@ describe('deployments', () => {
 
     expect(cli.api.get).toHaveBeenCalledWith('/projects/shop/deployments', {
       organization: 'acme',
-      query: { context: 'functions', scope: 'fn_1', status: 'succeeded', page: 1, page_size: 100 },
+      query: { context: 'functions', scope: 'fn_1', status: 'succeeded', sort: 'desc', page: 1, page_size: 30 },
+    });
+  });
+
+  it('filters by version and trigger and pages through them, oldest first', async () => {
+    const cli = harness({ routes: projectDeployments });
+
+    await cli.run('deployments', 'list', '--version-contains', 'v3', '--trigger', 'promote', '--page', '2', '--limit', '10', '--oldest-first');
+
+    expect(cli.api.get).toHaveBeenCalledWith('/projects/shop/deployments', {
+      organization: 'acme',
+      query: { version: 'v3', trigger: 'promote', sort: 'asc', page: 2, page_size: 10 },
+    });
+  });
+
+  it('tells how to reach the next page', async () => {
+    const cli = harness({
+      routes: { '/projects/shop/deployments': { items: [projectDeployments['/projects/shop/deployments'].items[0]], total: 45 } },
+    });
+
+    await cli.run('deployments', 'list', '--limit', '1', '--page', '3');
+
+    expect(cli.stderr.join('')).toContain('Showing 3–3 of 45. Next page: --page 4, or --all for every one.');
+  });
+
+  it('loads every page with --all', async () => {
+    const cli = harness();
+    const deployment = projectDeployments['/projects/shop/deployments'].items[0];
+    cli.api.get
+      .mockResolvedValueOnce({ items: Array.from({ length: 100 }, () => deployment), total: 101 })
+      .mockResolvedValueOnce({ items: [deployment], total: 101 });
+
+    await cli.run('deployments', 'list', '--all', '--json');
+
+    expect(JSON.parse(cli.stdout.join(''))).toHaveLength(101);
+    expect(cli.api.get).toHaveBeenLastCalledWith('/projects/shop/deployments', {
+      organization: 'acme',
+      query: { sort: 'desc', page: 2, page_size: 100 },
+    });
+  });
+
+  it('refuses --page together with --all', async () => {
+    const cli = harness({ routes: projectDeployments });
+
+    await expect(cli.run('deployments', 'list', '--all', '--page', '2')).rejects.toMatchObject({
+      message: 'Choose either --all or --page.',
     });
   });
 
@@ -967,6 +1034,17 @@ describe('users', () => {
       query: { environment: 'main', email: 'ada@acme.com', is_banned: 'true', sort: 'desc', page: 1, page_size: 20 },
     });
     expect(cli.stdout.join('')).toMatch(/usr_2\s+bob\s+no\s+yes/);
+  });
+
+  it('pages through users, oldest first', async () => {
+    const cli = harness({ routes: userRoutes });
+
+    await cli.run('users', 'list', '--page', '2', '--oldest-first');
+
+    expect(cli.api.get).toHaveBeenCalledWith('/projects/shop/users', {
+      organization: 'acme',
+      query: { environment: 'main', sort: 'asc', page: 2, page_size: 30 },
+    });
   });
 
   it('shows one user', async () => {

@@ -4,7 +4,9 @@ import type { Api } from '../api/http';
 import { resources, type Scope } from '../api/resources';
 import type { ContextFactory } from '../context';
 import { CliError } from '../errors';
+import { deploymentFilters, withDeploymentFilters, type DeploymentFilterFlags } from './deployments';
 import { downloadExample, fetchCatalog, findExample } from '../examples';
+import { EVERY_PAGE, notePage, pageRequest, withPageOptions, type PageFlags, type PageRequest } from '../pagination';
 import { examples } from '../ui/help';
 import { statusTone } from '../ui/style';
 import {
@@ -21,12 +23,15 @@ import {
   type FunctionSource,
 } from '../workspace';
 
-async function loadHistory(api: Api, target: Scope, slug: string) {
-  const [edgeFunction, deployments] = await Promise.all([
+async function loadHistory(api: Api, target: Scope, slug: string, filters: Record<string, string>, request: PageRequest) {
+  const [edgeFunction, page] = await Promise.all([
     resources.function(api, target, slug),
-    resources.deployments(api, target, slug),
+    resources.deployments(api, target, slug, filters, request),
   ]);
-  return deployments.map((deployment) => ({ ...deployment, live: deployment.version === edgeFunction.version }));
+  return {
+    ...page,
+    items: page.items.map((deployment) => ({ ...deployment, live: deployment.version === edgeFunction.version })),
+  };
 }
 
 const NO_WORKSPACE = () => new CliError('There is no Nulvless workspace here.', { hint: 'Run `nulvless init` first.' });
@@ -174,12 +179,15 @@ export function registerFunctionCommands(program: Command, context: ContextFacto
   functions
     .command('list')
     .description('List the Edge Functions of a project')
-    .action(async (_options, command: Command) => {
+    .option('--search <text>', 'only functions whose name or slug contains this text')
+    .action(async (options: { search?: string }, command: Command) => {
       const { api, scope, output } = await context(command.optsWithGlobals());
 
       const target = await scope();
       output.table(
-        await output.task('Loading functions', () => resources.functions(api, target)),
+        await output.task('Loading functions', () =>
+          resources.functions(api, target, options.search ? { search: options.search } : {}),
+        ),
         [
           { header: 'SLUG', value: (fn) => fn.slug },
           { header: 'NAME', value: (fn) => fn.name },
@@ -193,29 +201,37 @@ export function registerFunctionCommands(program: Command, context: ContextFacto
       );
     });
 
-  functions
-    .command('deployments')
-    .description('List the deployments of an Edge Function, with the live version and the ones you can promote')
-    .argument('<slug>', 'function slug')
-    .action(async (slug: string, _options, command: Command) => {
-      const { api, scope, output } = await context(command.optsWithGlobals());
+  withPageOptions(
+    withDeploymentFilters(
+      functions
+        .command('deployments')
+        .description('List the deployments of an Edge Function, with the live version and the ones you can promote')
+        .argument('<slug>', 'function slug'),
+    ),
+  ).action(async (slug: string, options: DeploymentFilterFlags & PageFlags, command: Command) => {
+    const { api, scope, output } = await context(command.optsWithGlobals());
 
-      const target = await scope();
-      output.table(
-        await output.task(`Loading deployments of ${slug}`, () => loadHistory(api, target, slug)),
-        [
-          { header: 'VERSION', value: (deployment) => deployment.short_version },
-          { header: 'STATUS', value: (deployment) => deployment.status, tone: (deployment) => statusTone(deployment.status) },
-          { header: 'LIVE', value: (deployment) => (deployment.live ? 'live' : ''), tone: () => 'good' },
-          { header: 'PROMOTE', value: (deployment) => (deployment.promote_available ? 'yes' : '') },
-          { header: 'TRIGGER', value: (deployment) => deployment.trigger },
-          { header: 'CREATED', value: (deployment) => new Date(deployment.created_at).toLocaleString() },
-          { header: 'ID', value: (deployment) => deployment.id },
-        ],
-        { message: `${slug} has no deployments yet.`, hint: 'Deployments appear here once the function is published.' },
-      );
-      if (!output.json) output.note(`Serve an earlier version again: nulvless functions promote ${slug} <version>`);
-    });
+    const request = pageRequest(options, command);
+    const target = await scope();
+    const history = await output.task(`Loading deployments of ${slug}`, () =>
+      loadHistory(api, target, slug, deploymentFilters(options), request),
+    );
+    output.table(
+      history.items,
+      [
+        { header: 'VERSION', value: (deployment) => deployment.short_version },
+        { header: 'STATUS', value: (deployment) => deployment.status, tone: (deployment) => statusTone(deployment.status) },
+        { header: 'LIVE', value: (deployment) => (deployment.live ? 'live' : ''), tone: () => 'good' },
+        { header: 'PROMOTE', value: (deployment) => (deployment.promote_available ? 'yes' : '') },
+        { header: 'TRIGGER', value: (deployment) => deployment.trigger },
+        { header: 'CREATED', value: (deployment) => new Date(deployment.created_at).toLocaleString() },
+        { header: 'ID', value: (deployment) => deployment.id },
+      ],
+      { message: `${slug} has no deployments yet.`, hint: 'Deployments appear here once the function is published.' },
+    );
+    notePage(output, history, request);
+    if (!output.json) output.note(`Serve an earlier version again: nulvless functions promote ${slug} <version>`);
+  });
 
   functions
     .command('promote')
@@ -227,7 +243,9 @@ export function registerFunctionCommands(program: Command, context: ContextFacto
       const { api, scope, output, prompter, confirm } = await context(command.optsWithGlobals());
 
       const target = await scope();
-      const history = await output.task(`Loading deployments of ${slug}`, () => loadHistory(api, target, slug));
+      const { items: history } = await output.task(`Loading deployments of ${slug}`, () =>
+        loadHistory(api, target, slug, {}, EVERY_PAGE),
+      );
       const listHint = `Run \`nulvless functions deployments ${slug}\` to see its versions.`;
 
       let deploymentId = version;

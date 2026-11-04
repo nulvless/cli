@@ -1,4 +1,5 @@
 import type { Api } from './http';
+import { MAX_PAGE_SIZE, type Page, type PageRequest } from '../pagination';
 
 export interface Organization {
   slug: string;
@@ -180,26 +181,34 @@ export interface TemplateBody {
 
 type CommonTemplates = Record<string, { key: string }[]>;
 
-interface Page<T> {
-  items: T[];
-  total?: number;
-}
-
 export interface Scope {
   organization: string;
   project: string;
 }
 
-const PAGE_SIZE = 100;
-
 async function allPages<T>(api: Api, path: string, organization: string, filters: Record<string, string> = {}) {
   const items: T[] = [];
 
   for (let page = 1; ; page++) {
-    const result = await api.get<Page<T>>(path, { organization, query: { ...filters, page, page_size: PAGE_SIZE } });
+    const result = await api.get<Page<T>>(path, { organization, query: { ...filters, page, page_size: MAX_PAGE_SIZE } });
     items.push(...result.items);
-    if (result.items.length < PAGE_SIZE || (result.total !== undefined && items.length >= result.total)) return items;
+    if (result.items.length < MAX_PAGE_SIZE || (result.total !== undefined && items.length >= result.total)) return items;
   }
+}
+
+async function pageOf<T>(
+  api: Api,
+  path: string,
+  organization: string,
+  filters: Record<string, string>,
+  request: PageRequest,
+): Promise<Page<T>> {
+  const sorted = { ...filters, sort: request.sort };
+  if (request.all) {
+    const items = await allPages<T>(api, path, organization, sorted);
+    return { items, total: items.length };
+  }
+  return api.get<Page<T>>(path, { organization, query: { ...sorted, page: request.page, page_size: request.limit } });
 }
 
 const usersPath = (scope: Scope) => `/projects/${encodeURIComponent(scope.project)}/users`;
@@ -232,8 +241,8 @@ export const resources = {
       organization: scope.organization,
     }),
 
-  functions: (api: Api, scope: Scope) =>
-    allPages<EdgeFunction>(api, `/projects/${encodeURIComponent(scope.project)}/functions`, scope.organization),
+  functions: (api: Api, scope: Scope, filters: Record<string, string> = {}) =>
+    allPages<EdgeFunction>(api, `/projects/${encodeURIComponent(scope.project)}/functions`, scope.organization, filters),
 
   commonTemplates: (api: Api, scope: Scope) =>
     api.get<CommonTemplates>('/projects/templates/commons', { organization: scope.organization }),
@@ -266,8 +275,8 @@ export const resources = {
       organization: scope.organization,
     }),
 
-  projectDeployments: (api: Api, scope: Scope, filters: Record<string, string>) =>
-    allPages<Deployment>(api, `/projects/${encodeURIComponent(scope.project)}/deployments`, scope.organization, filters),
+  projectDeployments: (api: Api, scope: Scope, filters: Record<string, string>, request: PageRequest) =>
+    pageOf<Deployment>(api, `/projects/${encodeURIComponent(scope.project)}/deployments`, scope.organization, filters, request),
 
   deployment: (api: Api, scope: Scope, id: string) =>
     api.get<Deployment>(`/projects/${encodeURIComponent(scope.project)}/deployments/${encodeURIComponent(id)}`, {
@@ -392,11 +401,8 @@ export const resources = {
       organization,
     }),
 
-  users: (api: Api, scope: Scope, environment: string, filters: Record<string, string>, pageSize: number) =>
-    api.get<Page<ProjectUser>>(usersPath(scope), {
-      organization: scope.organization,
-      query: { environment, ...filters, sort: 'desc', page: 1, page_size: pageSize },
-    }),
+  users: (api: Api, scope: Scope, environment: string, filters: Record<string, string>, request: PageRequest) =>
+    pageOf<ProjectUser>(api, usersPath(scope), scope.organization, { environment, ...filters }, request),
 
   user: (api: Api, scope: Scope, environment: string, id: string) =>
     api.get<ProjectUser>(`${usersPath(scope)}/${encodeURIComponent(id)}`, {
@@ -446,8 +452,8 @@ export const resources = {
       organization: scope.organization,
     }),
 
-  deployments: (api: Api, scope: Scope, fn: string) =>
-    allPages<Deployment>(api, `${functionPath(scope, fn)}/deployments`, scope.organization),
+  deployments: (api: Api, scope: Scope, fn: string, filters: Record<string, string>, request: PageRequest) =>
+    pageOf<Deployment>(api, `${functionPath(scope, fn)}/deployments`, scope.organization, filters, request),
 
   createFunction: (api: Api, scope: Scope, form: FormData) =>
     api.post<EdgeFunction>(`/projects/${encodeURIComponent(scope.project)}/functions`, {

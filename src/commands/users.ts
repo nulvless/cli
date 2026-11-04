@@ -1,21 +1,21 @@
-import { InvalidArgumentError, type Command } from 'commander';
+import type { Command } from 'commander';
 import { resources, type ProjectUser, type UserSession } from '../api/resources';
 import type { ContextFactory } from '../context';
 import { CliError } from '../errors';
 import { environmentLabel, environmentOption } from '../environment-option';
+import { notePage, pageRequest, withPageOptions, type PageFlags } from '../pagination';
 import { examples } from '../ui/help';
 
 interface EnvironmentFlag {
   env: string;
 }
 
-interface ListFlags extends EnvironmentFlag {
+interface ListFlags extends EnvironmentFlag, PageFlags {
   email?: string;
   phone?: string;
   username?: string;
   banned?: boolean;
   unconfirmed?: boolean;
-  limit: number;
 }
 
 interface CreateFlags extends EnvironmentFlag {
@@ -26,9 +26,6 @@ interface CreateFlags extends EnvironmentFlag {
   password?: boolean;
   confirmed?: boolean;
 }
-
-const MAX_PAGE_SIZE = 100;
-const DEFAULT_LIMIT = 50;
 
 type UserAction = 'ban' | 'unban' | 'delete' | 'sign-out';
 
@@ -59,14 +56,6 @@ const USER_ACTIONS: { action: UserAction; description: string; question: (id: st
   },
 ];
 
-function pageSize(value: string) {
-  const size = Number(value);
-  if (!Number.isInteger(size) || size < 1 || size > MAX_PAGE_SIZE) {
-    throw new InvalidArgumentError(`Use a number from 1 to ${MAX_PAGE_SIZE}.`);
-  }
-  return size;
-}
-
 function identifier(user: ProjectUser) {
   if (user.email) return user.email;
   if (user.username) return user.username;
@@ -96,49 +85,48 @@ export function registerUserCommands(program: Command, context: ContextFactory) 
       ]),
     );
 
-  users
-    .command('list')
-    .description('List users, newest first; filters match exactly')
-    .option('--email <email>', 'only this email')
-    .option('--phone <phone>', 'only this phone number')
-    .option('--username <username>', 'only this username')
-    .option('--banned', 'only banned users')
-    .option('--unconfirmed', 'only users who did not confirm their account')
-    .option('--limit <count>', `how many users to show, up to ${MAX_PAGE_SIZE}`, pageSize, DEFAULT_LIMIT)
-    .addOption(environmentOption())
-    .action(async (options: ListFlags, command: Command) => {
-      const { api, scope, output } = await context(command.optsWithGlobals());
+  withPageOptions(
+    users
+      .command('list')
+      .description('List users, newest first; filters match exactly')
+      .option('--email <email>', 'only this email')
+      .option('--phone <phone>', 'only this phone number')
+      .option('--username <username>', 'only this username')
+      .option('--banned', 'only banned users')
+      .option('--unconfirmed', 'only users who did not confirm their account')
+      .addOption(environmentOption()),
+  ).action(async (options: ListFlags, command: Command) => {
+    const { api, scope, output } = await context(command.optsWithGlobals());
 
-      const target = await scope();
-      const filters: Record<string, string> = {
-        ...(options.email ? { email: options.email } : {}),
-        ...(options.phone ? { phone: options.phone } : {}),
-        ...(options.username ? { username: options.username } : {}),
-        ...(options.banned ? { is_banned: 'true' } : {}),
-        ...(options.unconfirmed ? { is_confirmed: 'false' } : {}),
-      };
-      const page = await output.task(`Loading users of ${options.env}`, () =>
-        resources.users(api, target, options.env, filters, options.limit),
-      );
+    const request = pageRequest(options, command);
+    const target = await scope();
+    const filters: Record<string, string> = {
+      ...(options.email ? { email: options.email } : {}),
+      ...(options.phone ? { phone: options.phone } : {}),
+      ...(options.username ? { username: options.username } : {}),
+      ...(options.banned ? { is_banned: 'true' } : {}),
+      ...(options.unconfirmed ? { is_confirmed: 'false' } : {}),
+    };
+    const page = await output.task(`Loading users of ${options.env}`, () =>
+      resources.users(api, target, options.env, filters, request),
+    );
 
-      output.table(
-        page.items,
-        [
-          { header: 'ID', value: (user) => user.id },
-          { header: 'USER', value: identifier },
-          { header: 'CONFIRMED', value: (user) => yesNo(user.is_confirmed) },
-          { header: 'BANNED', value: (user) => yesNo(user.is_banned), tone: (user) => (user.is_banned ? 'bad' : 'plain') },
-          {
-            header: 'LAST SIGN-IN',
-            value: (user) => (user.last_sign_in_at ? new Date(user.last_sign_in_at).toLocaleString() : 'never'),
-          },
-        ],
-        { message: `No users in ${options.env} match.` },
-      );
-      if (!output.json && page.total !== undefined && page.total > page.items.length) {
-        output.note(`Showing ${page.items.length} of ${page.total}. Narrow it with a filter or raise --limit.`);
-      }
-    });
+    output.table(
+      page.items,
+      [
+        { header: 'ID', value: (user) => user.id },
+        { header: 'USER', value: identifier },
+        { header: 'CONFIRMED', value: (user) => yesNo(user.is_confirmed) },
+        { header: 'BANNED', value: (user) => yesNo(user.is_banned), tone: (user) => (user.is_banned ? 'bad' : 'plain') },
+        {
+          header: 'LAST SIGN-IN',
+          value: (user) => (user.last_sign_in_at ? new Date(user.last_sign_in_at).toLocaleString() : 'never'),
+        },
+      ],
+      { message: `No users in ${options.env} match.` },
+    );
+    notePage(output, page, request);
+  });
 
   users
     .command('get')
