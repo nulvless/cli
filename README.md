@@ -160,6 +160,23 @@ nulvless whoami    # who is signed in
 nulvless logout    # remove the session from this computer
 ```
 
+### Sudo
+
+Some actions ask you to confirm it is you first: creating or revoking API
+keys, rotating signing keys and merging environments. When one does, the CLI
+sends a code to your email, phone or authenticator, asks for it, and runs the
+action. Sudo then stays active for a few minutes, so the next protected actions
+run without asking.
+
+```bash
+nulvless sudo                          # confirm now, before a batch of actions
+nulvless keys create CI --type private --env staging
+```
+
+Outside a terminal there is nothing to type the code into, so protected actions
+fail with a hint: run `nulvless sudo` in a terminal first, then repeat them
+within the sudo window. `NULVLESS_TOKEN` cannot be elevated.
+
 ### CI and automation
 
 Set `NULVLESS_TOKEN` to an access token. It takes precedence over any stored
@@ -171,33 +188,55 @@ NULVLESS_TOKEN=… nulvless functions list --org acme --project shop --json
 
 ## Commands
 
+Commands that act on one environment take `--env <environment>`, which
+defaults to `main` (production). Run `nulvless <command> --help` for every
+option.
+
 ```text
-nulvless login                                  sign in in the browser
-nulvless logout                                 remove the stored session
-nulvless whoami                                 account and organizations
+nulvless login | logout | whoami                sign in, sign out, show the account
+nulvless sudo                                   confirm it is you before protected actions
+nulvless doctor                                 check your setup and print each fix
 
 nulvless init                                   create a workspace (nulvless/) here
 nulvless create <dir> --example <name>          new project from an example app
-nulvless examples [--kind function|app]         example functions and apps
+nulvless examples [--kind function|app|template]
 
-nulvless environments list                      environments of the project (alias: envs)
-nulvless environments create <slug> [--name]    create an environment
-nulvless environments delete <slug>             delete an environment
-
-nulvless functions new <slug> [--template <name>]  new function in the workspace (alias: fn)
+nulvless functions new <slug> [--template]      new function in the workspace (alias: fn)
+nulvless functions pull [slug...]               write existing functions into the workspace
 nulvless functions deploy [slug...]             create or update functions from the workspace
 nulvless functions list                         Edge Functions of the project
-nulvless functions deployments <slug>           deployment history, with the live version
+nulvless functions deployments <slug>           history, with the live version
 nulvless functions promote <slug> [version]     serve an earlier kept version again
-
-nulvless templates new <slug> [--template]      new email or SMS template in the workspace
-nulvless templates push [slug...] --env <env>   create or update templates of an environment
-nulvless templates pull [slug...] --env <env>   write an environment's templates into the workspace
 nulvless functions delete <slug>                delete a function
 
-nulvless secrets list --function <slug>         secret names, never values
-nulvless secrets set KEY[=VALUE] --function <slug>
-nulvless secrets unset KEY --function <slug>
+nulvless secrets list | set | unset --function <slug>
+nulvless secrets pull --function <slug> [-o]    write the values to a local env file
+
+nulvless deployments list [--function] [--context] [--status]
+nulvless deployments get <id>                   pipeline steps and why it failed
+
+nulvless templates new <slug> [--template]      new email or SMS template in the workspace
+nulvless templates push | pull [slug...] --env <env>
+
+nulvless environments list | create | delete    environments of the project (alias: envs)
+nulvless environments diff <origin> <destination>
+nulvless environments merge <origin> <destination> [--wait]
+
+nulvless users list [--email] [--banned] ...    users of an environment
+nulvless users get | create | delete | ban | unban | sign-out
+nulvless users sessions | factors <id>
+nulvless users remove-factor <id> <factor-id>
+
+nulvless oauth settings [update]                OAuth Server settings
+nulvless oauth clients list | get | create | update | delete | rotate-secret
+
+nulvless keys list | create | revoke            API keys
+nulvless signing-keys list | create | promote | restore | revoke | delete
+
+nulvless projects list | get | create | health | pause | restore | delete
+nulvless domains list | add | remove
+nulvless orgs list
+nulvless members list | invite | remove
 
 nulvless docs [path]                            the docs as Markdown
 ```
@@ -235,6 +274,15 @@ reserved by the platform and rejected before any request is sent.
 | `NULVLESS_EXAMPLES_URL` | Where to read examples from, for testing a fork of `nulvless/examples` |
 | `NO_COLOR` | Disables colors |
 | `FORCE_HYPERLINK` | `1` or `0` forces clickable links in the terminal on or off |
+
+## Diagnostics and updates
+
+`nulvless doctor` checks Node.js, the CLI version, whether the API answers,
+your sign-in, the workspace and access to its project, and prints the command
+that fixes each problem. With `--json` an agent can read the same report.
+
+Once a day the CLI checks npm for a newer version and, in a terminal, mentions
+it after the command finishes. The check is skipped in CI and with `--json`.
 
 ## Output and exit codes
 

@@ -5,6 +5,7 @@ import { brand, hyperlink, toned, type Tone } from './ui/style';
 export interface Output {
   json: boolean;
   data(value: unknown): void;
+  print(text: string): void;
   table<T>(rows: T[], columns: Column<T>[], empty: EmptyState): void;
   banner(version: string): void;
   step(message: string): void;
@@ -72,6 +73,9 @@ export function createOutput(
     json,
     data(value) {
       streams.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
+    },
+    print(text) {
+      streams.stdout.write(text.endsWith('\n') ? text : `${text}\n`);
     },
     table(rows, columns, empty) {
       if (json) return this.data(rows);

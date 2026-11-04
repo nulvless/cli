@@ -2,7 +2,8 @@ import type { Command } from 'commander';
 import open from 'open';
 import { resources } from '../api/resources';
 import { login } from '../auth/login';
-import type { ContextFactory } from '../context';
+import { sudoMinutes, type ContextFactory } from '../context';
+import { examples } from '../ui/help';
 import { claimsOf } from '../jwt';
 import { consoleUrl } from '../platform';
 
@@ -60,6 +61,20 @@ export function registerAuthCommands(program: Command, context: ContextFactory) 
       const account = textClaim(claims, 'name', 'preferred_username') ?? textClaim(claims, 'email');
       output.success(account ? `Signed out of ${account}` : 'Signed out');
       output.note(`Removed the session from ${store.location}`);
+    });
+
+  program
+    .command('sudo')
+    .description('Confirm it is you so protected actions run without asking, for a few minutes')
+    .addHelpText('after', examples(['nulvless sudo', 'nulvless sudo && nulvless keys create ci --yes']))
+    .action(async (_options, command: Command) => {
+      const { elevate, output } = await context(command.optsWithGlobals());
+
+      const { expiresIn } = await elevate();
+
+      if (output.json) return output.data({ expires_in: expiresIn });
+      output.success(`Sudo is active for ${sudoMinutes(expiresIn)}.`);
+      output.note('Protected actions such as creating keys or merging environments run without asking until then.');
     });
 
   program

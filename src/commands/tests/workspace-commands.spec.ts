@@ -1,4 +1,5 @@
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { stripVTControlCharacters as plain } from 'node:util';
+import { mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { confirmAction, type Context, type GlobalFlags } from '../../context';
@@ -70,17 +71,19 @@ async function harness(
   flags: Partial<GlobalFlags> = {},
   deployed: string[] = [],
   projectTemplates: Record<string, unknown>[] = [],
+  routes: Record<string, unknown> = {},
 ) {
   const cwd = await mkdtemp(join(tmpdir(), 'nulvless-cli-'));
   const stdout: string[] = [];
   const stderr: string[] = [];
-  const prompter: Prompter = { interactive: false, choose: jest.fn(), confirm: jest.fn(), secret: jest.fn() };
+  const prompter: Prompter = { interactive: false, choose: jest.fn(), confirm: jest.fn(), secret: jest.fn(), text: jest.fn() };
   const fetch = jest.fn(async (url: string) =>
     url in served ? new Response(served[url]) : new Response('', { status: 404 }),
   );
 
   const api = {
     get: jest.fn(async (path: string) => {
+      if (path in routes) return routes[path];
       if (path === '/projects/templates/commons') return COMMONS;
       if (path.endsWith('/templates')) return { items: projectTemplates, total: projectTemplates.length };
       return { items: deployed.map((slug) => ({ slug })), total: deployed.length };
@@ -101,8 +104,8 @@ async function harness(
       platform: { examplesUrl: EXAMPLES_URL },
       prompter,
       output: createOutput(Boolean(globals.json), {
-        stdout: { write: (text: string) => stdout.push(text) },
-        stderr: { write: (text: string) => stderr.push(text) },
+        stdout: { write: (text: string) => stdout.push(plain(text)) },
+        stderr: { write: (text: string) => stderr.push(plain(text)) },
       }),
       confirm: (message: string) => confirmAction({ ...globals, ...flags }, prompter, message),
     }) as unknown as Context;
@@ -528,6 +531,91 @@ describe('templates pull', () => {
 
     await expect(cli.run('templates', 'pull', '--env', 'main')).rejects.toMatchObject({
       message: 'main has no templates of its own yet.',
+    });
+  });
+});
+
+describe('functions pull', () => {
+  const sources = {
+    '/projects/shop/functions': { items: [{ slug: 'checkout' }, { slug: 'hello' }], total: 2 },
+    '/projects/shop/functions/checkout/source': {
+      files: [
+        { path: 'index.ts', content: 'export default () => new Response("checkout");' },
+        { path: 'deno.json', content: '{}' },
+      ],
+    },
+    '/projects/shop/functions/hello/source': { files: [{ path: 'index.ts', content: 'hello' }] },
+  };
+
+  it('writes every function of the project into the workspace', async () => {
+    const cli = await harness({}, [], [], sources);
+    await cli.run('init');
+
+    await cli.run('functions', 'pull');
+
+    await expect(readFile(join(cli.cwd, 'nulvless/functions/checkout/deno.json'), 'utf8')).resolves.toBe('{}');
+    await expect(readFile(join(cli.cwd, 'nulvless/functions/hello/index.ts'), 'utf8')).resolves.toBe('hello');
+    expect(cli.stderr.join('')).toContain('Pulled 2 function(s) into nulvless/functions.');
+  });
+
+  it('pulls only the named functions and prints JSON', async () => {
+    const cli = await harness({}, [], [], sources);
+    await cli.run('init');
+
+    await cli.run('functions', 'pull', 'hello', '--json');
+
+    expect(JSON.parse(cli.stdout.join(''))).toEqual([{ slug: 'hello', path: 'nulvless/functions/hello', files: ['index.ts'] }]);
+  });
+
+  it('asks before overwriting a local function', async () => {
+    const cli = await harness({}, [], [], sources);
+    await cli.run('init');
+    await cli.run('functions', 'new', 'hello');
+
+    await expect(cli.run('functions', 'pull', 'hello')).rejects.toMatchObject({
+      hint: 'Pass --yes to confirm without a prompt.',
+    });
+    await expect(readFile(join(cli.cwd, 'nulvless/functions/hello/index.ts'), 'utf8')).resolves.toContain('handler');
+  });
+});
+
+describe('secrets pull', () => {
+  const secretRoutes = {
+    '/projects/shop/functions/checkout/secrets': {
+      items: [{ key: 'STRIPE_SECRET_KEY' }, { key: 'GREETING' }],
+      total: 2,
+    },
+    '/projects/shop/functions/checkout/secrets/STRIPE_SECRET_KEY/reveal': { value: 'sk_test_123' },
+    '/projects/shop/functions/checkout/secrets/GREETING/reveal': { value: 'hello "world"\nbye' },
+  };
+
+  it('writes the values into the function .env.local, readable only by the user', async () => {
+    const cli = await harness({}, [], [], secretRoutes);
+    await cli.run('init');
+    await cli.run('functions', 'new', 'checkout');
+
+    await cli.run('secrets', 'pull', '--function', 'checkout');
+
+    const file = join(cli.cwd, 'nulvless/functions/checkout/.env.local');
+    await expect(readFile(file, 'utf8')).resolves.toBe('STRIPE_SECRET_KEY="sk_test_123"\nGREETING="hello \\"world\\"\\nbye"\n');
+    expect((await stat(file)).mode & 0o777).toBe(0o600);
+    expect(cli.stderr.join('')).not.toContain('sk_test_123');
+  });
+
+  it('writes to --output and never prints values in JSON', async () => {
+    const cli = await harness({}, [], [], secretRoutes);
+
+    await cli.run('secrets', 'pull', '--function', 'checkout', '--output', 'checkout.env', '--json');
+
+    expect(JSON.parse(cli.stdout.join(''))).toEqual({ path: join(cli.cwd, 'checkout.env'), keys: ['STRIPE_SECRET_KEY', 'GREETING'] });
+  });
+
+  it('needs --output outside a workspace', async () => {
+    const cli = await harness({}, [], [], secretRoutes);
+
+    await expect(cli.run('secrets', 'pull', '--function', 'checkout')).rejects.toMatchObject({
+      message: 'Choose where to write the secrets.',
+      hint: 'Pass --output <file>, or run it inside a workspace to use nulvless/functions/checkout/.env.local.',
     });
   });
 });

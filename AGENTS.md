@@ -27,6 +27,16 @@ Run `npm test`, `npm run typecheck` and `npm run lint` before finishing a change
 - Errors are `CliError` subclasses from `src/errors.ts` with a user-facing
   message and a hint. Messages describe what the user tried to do, never
   internal details.
+- Commands on one environment use `environmentOption()` from
+  `src/environment-option.ts` (`--env`, default `main`) and name the
+  environment in every confirmation.
+- Sudo is handled by the API client: a `protected_action_denied` answer asks
+  for the code and repeats the request once. Commands do nothing special.
+- Print results through `output.print`, `output.data` or `output.table`, never
+  `process.stdout` directly.
+- Do not use `requiredOption` or `makeOptionMandatory` on subcommands: they
+  exit without the CLI's error format. Check the value in the action and throw
+  a `CliError` with a hint.
 - Write the failing spec first, then the code.
 - No comments in code; prefer clearer names.
 - The CLI never bundles, downloads or runs the Nulvless edge runtime.

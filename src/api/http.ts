@@ -1,4 +1,4 @@
-import { CliError, ForbiddenError, SessionExpiredError } from '../errors';
+import { CliError, ForbiddenError, SessionExpiredError, SudoRequiredError } from '../errors';
 
 export interface ApiRequest {
   organization?: string;
@@ -32,11 +32,14 @@ function joinMessage(message: ErrorBody['message']) {
   return Array.isArray(message) ? message.join(' ') : message;
 }
 
+const SUDO_REQUIRED = 'protected_action_denied';
+
 export async function failureFrom(response: Response, unauthorized: () => CliError): Promise<CliError> {
   const body = await errorBody(response);
   const message = joinMessage(body.message);
 
   if (response.status === 401) return unauthorized();
+  if (response.status === 403 && body.code === SUDO_REQUIRED) return new SudoRequiredError();
   if (response.status === 403) return new ForbiddenError(message ?? 'You do not have permission to do this.');
   return new CliError(message ?? `The Nulvless API answered with status ${response.status}.`);
 }
@@ -46,13 +49,16 @@ export function createApi({
   token,
   unauthorized = () => new SessionExpiredError(),
   fetchImpl = fetch,
+  elevate,
 }: {
   baseUrl: string;
   token: () => Promise<string>;
   unauthorized?: () => CliError;
   fetchImpl?: typeof fetch;
+  elevate?: () => Promise<unknown>;
 }): Api {
-  async function send<T>(method: string, path: string, { organization, query, body, form }: ApiRequest = {}): Promise<T> {
+  async function send<T>(method: string, path: string, request: ApiRequest = {}, elevated = false): Promise<T> {
+    const { organization, query, body, form } = request;
     const url = new URL(path, baseUrl);
     for (const [name, value] of Object.entries(query ?? {})) url.searchParams.set(name, String(value));
 
@@ -75,7 +81,14 @@ export function createApi({
       throw new CliError(`Could not reach the Nulvless API at ${url.host}.`, { hint: 'Check your connection and try again.' });
     }
 
-    if (!response.ok) throw await failureFrom(response, unauthorized);
+    if (!response.ok) {
+      const failure = await failureFrom(response, unauthorized);
+      if (failure instanceof SudoRequiredError && elevate && !elevated) {
+        await elevate();
+        return send<T>(method, path, request, true);
+      }
+      throw failure;
+    }
     if (response.status === 204) return undefined as T;
 
     const text = await response.text();

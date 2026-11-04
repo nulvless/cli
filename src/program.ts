@@ -1,11 +1,18 @@
 import { Command } from 'commander';
 import pc from 'picocolors';
 import { registerAuthCommands } from './commands/auth';
+import { registerDeploymentCommands } from './commands/deployments';
 import { registerDocsCommand } from './commands/docs';
+import { registerDoctorCommand } from './commands/doctor';
 import { registerEnvironmentCommands } from './commands/environments';
 import { registerFunctionCommands } from './commands/functions';
+import { registerKeyCommands } from './commands/keys';
+import { registerOAuthCommands } from './commands/oauth';
+import { registerOrganizationCommands } from './commands/organizations';
+import { registerProjectCommands } from './commands/projects';
 import { registerSecretCommands } from './commands/secrets';
 import { registerTemplateCommands } from './commands/templates';
+import { registerUserCommands } from './commands/users';
 import { registerWorkspaceCommands } from './commands/workspace';
 import type { ContextFactory } from './context';
 import { renderCommanderFailure } from './ui/failure';
@@ -53,9 +60,16 @@ export function buildProgram(context: ContextFactory, version: string) {
   registerWorkspaceCommands(program, context, version);
   registerEnvironmentCommands(program, context);
   registerFunctionCommands(program, context, version);
+  registerDeploymentCommands(program, context);
+  registerKeyCommands(program, context);
+  registerOAuthCommands(program, context);
+  registerProjectCommands(program, context);
+  registerOrganizationCommands(program, context);
+  registerUserCommands(program, context);
   registerSecretCommands(program, context);
   registerTemplateCommands(program, context, version);
   registerDocsCommand(program, context);
+  registerDoctorCommand(program, context, version);
 
   return program;
 }

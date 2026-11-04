@@ -14,6 +14,7 @@ function fakePrompter(interactive: boolean, answers: string[] = []): Prompter {
     choose: jest.fn(async () => answers.shift()) as Prompter['choose'],
     confirm: jest.fn(),
     secret: jest.fn(),
+    text: jest.fn(),
   };
 }
 

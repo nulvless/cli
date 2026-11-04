@@ -1,3 +1,4 @@
+import { stripVTControlCharacters as plain } from 'node:util';
 import type { Api } from '../../api/http';
 import { confirmAction, type Context, type GlobalFlags } from '../../context';
 import { CliError } from '../../errors';
@@ -28,12 +29,15 @@ function harness({ interactive = false, routes = {} }: { interactive?: boolean; 
     get: jest.fn(async (path: string) => routes[path]),
     post: jest.fn(async (_path: string, request?: { body?: unknown }) => request?.body),
     delete: jest.fn(async () => undefined),
+    patch: jest.fn(async () => ({})),
+    put: jest.fn(async () => ({})),
   } as unknown as jest.Mocked<Api>;
   const prompter: Prompter = {
     interactive,
     choose: jest.fn(),
     confirm: jest.fn(async () => true),
     secret: jest.fn(async () => 'typed-secret'),
+    text: jest.fn(),
   };
 
   const context = async (flags: GlobalFlags): Promise<Context> =>
@@ -42,12 +46,15 @@ function harness({ interactive = false, routes = {} }: { interactive?: boolean; 
       api,
       prompter,
       output: createOutput(Boolean(flags.json), {
-        stdout: { write: (text: string) => stdout.push(text) },
-        stderr: { write: (text: string) => stderr.push(text) },
+        stdout: { write: (text: string) => stdout.push(plain(text)) },
+        stderr: { write: (text: string) => stderr.push(plain(text)) },
       }),
       token: async () => tokenWith({ sub: 'usr_1', email: 'ada@example.com', name: 'Ada Lovelace' }),
       store,
       scope: async () => ({ organization: 'acme', project: 'shop' }),
+      organization: async () => 'acme',
+      platform: { consoleUrl: 'https://cloud.nulvless.com' },
+      elevate: jest.fn(async () => ({ expiresIn: 600 })),
       confirm: (message: string) => confirmAction(flags, prompter, message),
     }) as unknown as Context;
 
@@ -400,6 +407,617 @@ describe('functions promote', () => {
     await expect(cli.run('functions', 'promote', 'checkout')).rejects.toMatchObject({
       message: 'checkout has no other version to promote.',
     });
+  });
+});
+
+const projectDeployments = {
+  '/projects/shop/functions/checkout': { id: 'fn_1', slug: 'checkout', version: 'ver-3' },
+  '/projects/shop/deployments': {
+    items: [
+      { id: 'dep_9', context: 'environments', scope: 'env_1', short_version: 'e1', trigger: 'merge', status: 'running', created_at: '2026-11-04T12:00:00.000Z', metadata: { destination: 'staging' } },
+      { id: 'dep_3', context: 'functions', scope: 'fn_1', short_version: 'v3', trigger: 'deploy', status: 'succeeded', created_at: '2026-11-04T11:00:00.000Z', metadata: { function_slug: 'checkout' } },
+    ],
+    total: 2,
+  },
+  '/projects/shop/deployments/dep_3': {
+    id: 'dep_3',
+    context: 'functions',
+    short_version: 'v3',
+    trigger: 'deploy',
+    status: 'failed',
+    created_at: '2026-11-04T11:00:00.000Z',
+    metadata: { function_slug: 'checkout' },
+    pipeline: [
+      { name: 'initialize', status: 'succeeded', started_at: '2026-11-04T11:00:00.000Z', ended_at: '2026-11-04T11:00:00.200Z' },
+      { name: 'build', status: 'failed', started_at: '2026-11-04T11:00:00.200Z', ended_at: '2026-11-04T11:00:03.000Z', detail: { message: 'Module not found: ./util.ts' } },
+      { name: 'deploy', status: 'skipped', started_at: null, ended_at: null },
+    ],
+  },
+};
+
+describe('deployments', () => {
+  it('lists every deployment of the project with what it deployed', async () => {
+    const cli = harness({ routes: projectDeployments });
+
+    await cli.run('deployments', 'list');
+
+    const output = cli.stdout.join('');
+    expect(output).toContain('staging');
+    expect(output).toContain('checkout');
+  });
+
+  it('filters the deployments of one function', async () => {
+    const cli = harness({ routes: projectDeployments });
+
+    await cli.run('deployments', 'list', '--function', 'checkout', '--status', 'succeeded');
+
+    expect(cli.api.get).toHaveBeenCalledWith('/projects/shop/deployments', {
+      organization: 'acme',
+      query: { context: 'functions', scope: 'fn_1', status: 'succeeded', page: 1, page_size: 100 },
+    });
+  });
+
+  it('shows the steps of a deployment and why it failed', async () => {
+    const cli = harness({ routes: projectDeployments });
+
+    await cli.run('deployments', 'get', 'dep_3');
+
+    const output = cli.stdout.join('') + cli.stderr.join('');
+    expect(output).toMatch(/build\s+failed\s+2\.8s/);
+    expect(output).toContain('Module not found: ./util.ts');
+  });
+});
+
+const diffRoutes = {
+  '/projects/shop/diff/staging/into/main': {
+    auth: [
+      { field: 'signup.enabled', before: false, after: true },
+      { field: 'password.min_length', before: 8, after: 12 },
+    ],
+    communications: [{ field: 'email.provider', before: 'smtp', after: 'resend' }],
+    payments: [],
+  },
+  '/projects/shop/diff/main/into/staging': { auth: [], communications: [], payments: [] },
+  '/projects/shop/deployments/dep_merge': { id: 'dep_merge', status: 'succeeded', short_version: 'm1', trigger: 'merge', created_at: '2026-11-04T12:00:00.000Z' },
+};
+
+describe('environments diff', () => {
+  it('lists every setting that would change in the destination', async () => {
+    const cli = harness({ routes: diffRoutes });
+
+    await cli.run('environments', 'diff', 'staging', 'main');
+
+    const lines = cli.stdout.join('').split('\n');
+    expect(lines.find((line) => line.includes('password.min_length'))).toMatch(/auth\s+password\.min_length\s+8\s+12/);
+    expect(cli.stderr.join('')).toContain('3 change(s) would be merged from staging into main.');
+  });
+
+  it('says so when the environments match', async () => {
+    const cli = harness({ routes: diffRoutes });
+
+    await cli.run('environments', 'diff', 'main', 'staging');
+
+    expect(cli.stderr.join('')).toContain('main and staging have the same settings.');
+  });
+});
+
+describe('environments merge', () => {
+  it('confirms, queues the merge and points to its deployment', async () => {
+    const cli = harness({ routes: diffRoutes });
+    cli.api.post.mockResolvedValueOnce({ id: 'dep_merge', status: 'queued' });
+
+    await cli.run('environments', 'merge', 'staging', 'main', '--yes');
+
+    expect(cli.api.post).toHaveBeenCalledWith('/projects/shop/merge/staging/into/main', { organization: 'acme' });
+    expect(cli.stderr.join('')).toContain('nulvless deployments get dep_merge');
+  });
+
+  it('waits for the merge to finish with --wait', async () => {
+    const cli = harness({ routes: diffRoutes });
+    cli.api.post.mockResolvedValueOnce({ id: 'dep_merge', status: 'queued' });
+
+    await cli.run('environments', 'merge', 'staging', 'main', '--yes', '--wait');
+
+    expect(cli.stderr.join('')).toContain('Merged staging into main.');
+  });
+
+  it('refuses without --yes when it cannot ask', async () => {
+    const cli = harness({ routes: diffRoutes });
+
+    await expect(cli.run('environments', 'merge', 'staging', 'main')).rejects.toMatchObject({
+      hint: 'Pass --yes to confirm without a prompt.',
+    });
+    expect(cli.api.post).not.toHaveBeenCalled();
+  });
+
+  it('does nothing when there is nothing to merge', async () => {
+    const cli = harness({ routes: diffRoutes });
+
+    await cli.run('environments', 'merge', 'main', 'staging', '--yes');
+
+    expect(cli.api.post).not.toHaveBeenCalled();
+    expect(cli.stderr.join('')).toContain('Nothing to merge');
+  });
+});
+
+const keyRoutes = {
+  '/projects/shop/main/api-keys': [
+    { id: 'key_1', name: 'Web', type: 'public', alias: 'pk-ab…', key: 'pk-abc', created_at: '2026-11-01T00:00:00.000Z' },
+    { id: 'key_2', name: 'Server', type: 'private', alias: 'sk-cd…', key: null, created_at: '2026-11-02T00:00:00.000Z' },
+  ],
+  '/projects/shop/staging/auth/signing-keys': [
+    { id: 'kid_current', algorithm: 'ES256', status: 'current', promoted_at: '2026-10-01T00:00:00.000Z' },
+    { id: 'kid_next', algorithm: 'ES256', status: 'standby', promoted_at: null },
+  ],
+};
+
+describe('keys', () => {
+  it('lists the API keys of production by default, never the full secret', async () => {
+    const cli = harness({ routes: keyRoutes });
+
+    await cli.run('keys', 'list');
+
+    const output = cli.stdout.join('');
+    expect(output).toContain('sk-cd…');
+    expect(cli.api.get).toHaveBeenCalledWith('/projects/shop/main/api-keys', { organization: 'acme' });
+  });
+
+  it('creates a key and prints it once', async () => {
+    const cli = harness({ routes: keyRoutes });
+    cli.api.post.mockResolvedValueOnce({ id: 'key_3', name: 'CI', type: 'private', key: 'sk-secret' });
+
+    await cli.run('keys', 'create', 'CI', '--type', 'private', '--env', 'staging');
+
+    expect(cli.api.post).toHaveBeenCalledWith('/projects/shop/staging/api-keys', {
+      organization: 'acme',
+      body: { name: 'CI', type: 'private' },
+    });
+    expect(cli.stdout.join('')).toBe('sk-secret\n');
+    expect(cli.stderr.join('')).toContain('shown only once');
+  });
+
+  it('needs the key type', async () => {
+    const cli = harness({ routes: keyRoutes });
+
+    await expect(cli.run('keys', 'create', 'CI')).rejects.toMatchObject({ message: 'Choose the key type.' });
+  });
+
+  it('revokes a key after confirming', async () => {
+    const cli = harness({ routes: keyRoutes });
+
+    await cli.run('keys', 'revoke', 'key_2', '--yes');
+
+    expect(cli.api.delete).toHaveBeenCalledWith('/projects/shop/main/api-keys/key_2', { organization: 'acme' });
+  });
+});
+
+describe('signing-keys', () => {
+  it('lists the signing keys of an environment', async () => {
+    const cli = harness({ routes: keyRoutes });
+
+    await cli.run('signing-keys', 'list', '--env', 'staging');
+
+    expect(cli.stdout.join('')).toMatch(/kid_next\s+ES256\s+standby/);
+  });
+
+  it('adds a standby key with the chosen algorithm', async () => {
+    const cli = harness({ routes: keyRoutes });
+    cli.api.post.mockResolvedValueOnce({ id: 'kid_new', algorithm: 'EdDSA', status: 'standby' });
+
+    await cli.run('signing-keys', 'create', '--algorithm', 'EdDSA', '--env', 'staging');
+
+    expect(cli.api.post).toHaveBeenCalledWith('/projects/shop/staging/auth/signing-keys', {
+      organization: 'acme',
+      body: { algorithm: 'EdDSA' },
+    });
+    expect(cli.stderr.join('')).toContain('nulvless signing-keys promote kid_new --env staging');
+  });
+
+  it.each([
+    ['promote', 'patch', '/projects/shop/staging/auth/signing-keys/kid_next/promote'],
+    ['restore', 'patch', '/projects/shop/staging/auth/signing-keys/kid_next/restore'],
+    ['revoke', 'delete', '/projects/shop/staging/auth/signing-keys/kid_next'],
+    ['delete', 'delete', '/projects/shop/staging/auth/signing-keys/kid_next/permanent'],
+  ] as const)('%s calls the API after confirming', async (action, method, path) => {
+    const cli = harness({ routes: keyRoutes });
+
+    await cli.run('signing-keys', action, 'kid_next', '--env', 'staging', '--yes');
+
+    expect(cli.api[method]).toHaveBeenCalledWith(path, { organization: 'acme' });
+  });
+});
+
+const oauthRoutes = {
+  '/projects/shop/main/oauth/settings': {
+    enabled: true,
+    allow_dynamic_clients: false,
+    authorization_path: '/oauth/consent',
+    issuer: 'https://shop.nulvless.co/auth',
+    authorization_base_url: 'https://shop.example.com',
+    site_url: 'https://shop.example.com',
+  },
+  '/projects/shop/main/oauth/clients': [
+    { client_id: 'cli_1', client_name: 'Acme Analytics', client_type: 'confidential', redirect_uris: ['https://acme.example.com/callback'], created_at: '2026-11-01T00:00:00.000Z' },
+  ],
+  '/projects/shop/main/oauth/clients/cli_1': {
+    client_id: 'cli_1',
+    client_name: 'Acme Analytics',
+    client_type: 'confidential',
+    token_endpoint_auth_method: 'client_secret_basic',
+    redirect_uris: ['https://acme.example.com/callback'],
+    grant_types: ['authorization_code', 'refresh_token'],
+  },
+};
+
+describe('oauth', () => {
+  it('shows the server settings', async () => {
+    const cli = harness({ routes: oauthRoutes });
+
+    await cli.run('oauth', 'settings');
+
+    expect(cli.stdout.join('')).toMatch(/Consent screen\s+https:\/\/shop\.example\.com\/oauth\/consent/);
+  });
+
+  it('updates only the settings that were passed', async () => {
+    const cli = harness({ routes: oauthRoutes });
+
+    await cli.run('oauth', 'settings', 'update', '--disable', '--consent-url', 'https://id.example.com', '--yes');
+
+    expect(cli.api.patch).toHaveBeenCalledWith('/projects/shop/main/oauth/settings', {
+      organization: 'acme',
+      body: { enabled: false, authorization_base_url: 'https://id.example.com' },
+    });
+  });
+
+  it('needs at least one setting to update', async () => {
+    const cli = harness({ routes: oauthRoutes });
+
+    await expect(cli.run('oauth', 'settings', 'update')).rejects.toMatchObject({ message: 'Nothing to update.' });
+  });
+
+  it('lists the clients', async () => {
+    const cli = harness({ routes: oauthRoutes });
+
+    await cli.run('oauth', 'clients', 'list');
+
+    expect(cli.stdout.join('')).toMatch(/cli_1\s+Acme Analytics\s+confidential/);
+  });
+
+  it('registers a confidential client and prints its secret once', async () => {
+    const cli = harness({ routes: oauthRoutes });
+    cli.api.post.mockResolvedValueOnce({ client_id: 'cli_2', client_secret: 'shh', client_type: 'confidential' });
+
+    await cli.run(
+      'oauth', 'clients', 'create', 'Acme Analytics',
+      '--type', 'confidential',
+      '--redirect-uri', 'https://acme.example.com/callback',
+      '--redirect-uri', 'http://localhost:3000/callback',
+    );
+
+    expect(cli.api.post).toHaveBeenCalledWith('/projects/shop/main/oauth/clients', {
+      organization: 'acme',
+      body: {
+        client_name: 'Acme Analytics',
+        client_type: 'confidential',
+        token_endpoint_auth_method: 'client_secret_basic',
+        redirect_uris: ['https://acme.example.com/callback', 'http://localhost:3000/callback'],
+        grant_types: ['authorization_code', 'refresh_token'],
+      },
+    });
+    expect(cli.stdout.join('')).toContain('shh');
+    expect(cli.stderr.join('')).toContain('shown only once');
+  });
+
+  it('needs at least one redirect URI', async () => {
+    const cli = harness({ routes: oauthRoutes });
+
+    await expect(cli.run('oauth', 'clients', 'create', 'Acme', '--type', 'public')).rejects.toMatchObject({
+      message: 'Add at least one redirect URI.',
+    });
+  });
+
+  it('updates a client keeping what was not passed', async () => {
+    const cli = harness({ routes: oauthRoutes });
+
+    await cli.run('oauth', 'clients', 'update', 'cli_1', '--name', 'Acme');
+
+    expect(cli.api.put).toHaveBeenCalledWith('/projects/shop/main/oauth/clients/cli_1', {
+      organization: 'acme',
+      body: {
+        client_name: 'Acme',
+        token_endpoint_auth_method: 'client_secret_basic',
+        redirect_uris: ['https://acme.example.com/callback'],
+        grant_types: ['authorization_code', 'refresh_token'],
+      },
+    });
+  });
+
+  it('rotates a secret after confirming', async () => {
+    const cli = harness({ routes: oauthRoutes });
+    cli.api.post.mockResolvedValueOnce({ client_id: 'cli_1', client_secret: 'new-secret' });
+
+    await cli.run('oauth', 'clients', 'rotate-secret', 'cli_1', '--yes');
+
+    expect(cli.api.post).toHaveBeenCalledWith('/projects/shop/main/oauth/clients/cli_1/regenerate-secret', { organization: 'acme' });
+    expect(cli.stdout.join('')).toBe('new-secret\n');
+  });
+
+  it('deletes a client after confirming', async () => {
+    const cli = harness({ routes: oauthRoutes });
+
+    await cli.run('oauth', 'clients', 'delete', 'cli_1', '--yes');
+
+    expect(cli.api.delete).toHaveBeenCalledWith('/projects/shop/main/oauth/clients/cli_1', { organization: 'acme' });
+  });
+});
+
+const orgRoutes = {
+  '/projects': [
+    { slug: 'shop', name: 'Shop', status: 'ready', services: ['auth'] },
+    { slug: 'blog', name: 'Blog', status: 'paused', services: ['auth'] },
+  ],
+  '/projects/shop': { slug: 'shop', name: 'Shop', status: 'ready', environments: [{ slug: 'main', name: 'Production', status: 'ready', url: 'https://shop.nulvless.co' }] },
+  '/projects/shop/health': [
+    { service: 'auth', status: 'up', latency_ms: 42, error: null },
+    { service: 'communications', status: 'down', latency_ms: 3000, error: 'timeout' },
+  ],
+  '/projects/shop/domains': [
+    { hostname: 'id.shop.com', status: 'pending', verification: 'pending', certificate: 'pending', dns: { type: 'CNAME', name: 'id.shop.com', value: 'shop.nulvless.co' } },
+  ],
+  '/organizations/acme/members': {
+    granted: [{ id: 'usr_1', name: 'Ada', email: 'ada@acme.com', membership: { id: 'mem_1', key: 'owner', status: 'granted' } }],
+    invitations: [{ id: 'usr_2', email: 'bob@acme.com', membership: { id: 'mem_2', key: 'developer', status: 'invited' } }],
+    requesteds: [],
+    blockeds: [],
+  },
+  '/organizations/members/roles': [
+    { id: 'role_admin', name: 'Admin', key: 'admin' },
+    { id: 'role_dev', name: 'Developer', key: 'developer' },
+  ],
+};
+
+describe('projects', () => {
+  it('lists the projects of the organization', async () => {
+    const cli = harness({ routes: orgRoutes });
+
+    await cli.run('projects', 'list');
+
+    expect(cli.stdout.join('')).toMatch(/blog\s+Blog\s+paused/);
+    expect(cli.api.get).toHaveBeenCalledWith('/projects', { organization: 'acme' });
+  });
+
+  it('creates a project with every service by default', async () => {
+    const cli = harness({ routes: orgRoutes });
+    cli.api.post.mockResolvedValueOnce({ slug: 'store', name: 'Store', status: 'building' });
+
+    await cli.run('projects', 'create', 'Store');
+
+    expect(cli.api.post).toHaveBeenCalledWith('/projects', {
+      organization: 'acme',
+      body: { name: 'Store', services: ['auth', 'logs', 'communications'] },
+    });
+    expect(cli.stderr.join('')).toContain('Created store');
+  });
+
+  it('shows the health of each service', async () => {
+    const cli = harness({ routes: orgRoutes });
+
+    await cli.run('projects', 'health');
+
+    expect(cli.stdout.join('')).toMatch(/communications\s+down\s+3000ms\s+timeout/);
+  });
+
+  it.each([
+    ['pause', '/projects/shop/pause'],
+    ['restore', '/projects/shop/restore'],
+  ])('%s asks first, then calls the API', async (action, path) => {
+    const cli = harness({ routes: orgRoutes });
+
+    await cli.run('projects', action, 'shop', '--yes');
+
+    expect(cli.api.patch).toHaveBeenCalledWith(path, { organization: 'acme' });
+  });
+
+  it('deletes a project only after confirming', async () => {
+    const cli = harness({ routes: orgRoutes });
+
+    await expect(cli.run('projects', 'delete', 'shop')).rejects.toMatchObject({ hint: 'Pass --yes to confirm without a prompt.' });
+    expect(cli.api.delete).not.toHaveBeenCalled();
+  });
+});
+
+describe('domains', () => {
+  it('lists the domains with the DNS record to create', async () => {
+    const cli = harness({ routes: orgRoutes });
+
+    await cli.run('domains', 'list');
+
+    expect(cli.stdout.join('')).toMatch(/id\.shop\.com\s+pending.*CNAME id\.shop\.com → shop\.nulvless\.co/);
+  });
+
+  it('adds a domain and prints the record to create', async () => {
+    const cli = harness({ routes: orgRoutes });
+    cli.api.post.mockResolvedValueOnce(orgRoutes['/projects/shop/domains'][0]);
+
+    await cli.run('domains', 'add', 'id.shop.com');
+
+    expect(cli.api.post).toHaveBeenCalledWith('/projects/shop/domains', { organization: 'acme', body: { hostname: 'id.shop.com' } });
+    expect(cli.stderr.join('')).toContain('CNAME id.shop.com → shop.nulvless.co');
+  });
+
+  it('removes a domain after confirming', async () => {
+    const cli = harness({ routes: orgRoutes });
+
+    await cli.run('domains', 'remove', 'id.shop.com', '--yes');
+
+    expect(cli.api.delete).toHaveBeenCalledWith('/projects/shop/domains/id.shop.com', { organization: 'acme' });
+  });
+});
+
+describe('members', () => {
+  it('lists members and pending invitations', async () => {
+    const cli = harness({ routes: orgRoutes });
+
+    await cli.run('members', 'list');
+
+    const output = cli.stdout.join('');
+    expect(output).toMatch(/ada@acme\.com\s+owner\s+granted/);
+    expect(output).toMatch(/bob@acme\.com\s+developer\s+invited/);
+  });
+
+  it('invites people with a role by its name', async () => {
+    const cli = harness({ routes: orgRoutes });
+    cli.api.post.mockResolvedValueOnce([]);
+
+    await cli.run('members', 'invite', 'eve@acme.com', 'joe@acme.com', '--role', 'developer');
+
+    expect(cli.api.post).toHaveBeenCalledWith('/organizations/acme/members/invites', {
+      organization: 'acme',
+      body: {
+        invites: [
+          { email: 'eve@acme.com', role_id: 'role_dev' },
+          { email: 'joe@acme.com', role_id: 'role_dev' },
+        ],
+        redirect_uri: 'https://cloud.nulvless.com/organizations/join',
+      },
+    });
+  });
+
+  it('names the roles when the one given does not exist', async () => {
+    const cli = harness({ routes: orgRoutes });
+
+    await expect(cli.run('members', 'invite', 'eve@acme.com', '--role', 'boss')).rejects.toMatchObject({
+      message: 'There is no role boss.',
+      hint: 'Use one of: admin, developer.',
+    });
+  });
+
+  it('removes a member by email after confirming', async () => {
+    const cli = harness({ routes: orgRoutes });
+
+    await cli.run('members', 'remove', 'bob@acme.com', '--yes');
+
+    expect(cli.api.delete).toHaveBeenCalledWith('/organizations/acme/members/mem_2', { organization: 'acme' });
+  });
+});
+
+describe('orgs', () => {
+  it('lists the organizations of the account', async () => {
+    const cli = harness({ routes: { '/organizations': [{ slug: 'acme', name: 'Acme' }] } });
+
+    await cli.run('orgs', 'list');
+
+    expect(cli.stdout.join('')).toMatch(/acme\s+Acme/);
+  });
+});
+
+const userRoutes = {
+  '/projects/shop/users': {
+    items: [
+      { id: 'usr_1', email: 'ada@acme.com', is_confirmed: true, is_banned: false, last_sign_in_at: '2026-11-03T10:00:00.000Z' },
+      { id: 'usr_2', username: 'bob', is_confirmed: false, is_banned: true, last_sign_in_at: null },
+    ],
+    total: 2,
+  },
+  '/projects/shop/users/usr_1': { id: 'usr_1', email: 'ada@acme.com', profile: { name: 'Ada' } },
+  '/projects/shop/users/usr_1/sessions': [
+    { id: 'ses_1', aal: 'aal2', created_at: '2026-11-03T10:00:00.000Z', finger_print: { browser: { name: 'Firefox' }, os: { name: 'Linux' } } },
+  ],
+  '/projects/shop/users/usr_1/factors': [{ id: 'fac_1', type: 'totp', created_at: '2026-10-01T00:00:00.000Z' }],
+};
+
+describe('users', () => {
+  it('lists one page of users of production, filtered', async () => {
+    const cli = harness({ routes: userRoutes });
+
+    await cli.run('users', 'list', '--email', 'ada@acme.com', '--banned', '--limit', '20');
+
+    expect(cli.api.get).toHaveBeenCalledWith('/projects/shop/users', {
+      organization: 'acme',
+      query: { environment: 'main', email: 'ada@acme.com', is_banned: 'true', page: 1, page_size: 20 },
+    });
+    expect(cli.stdout.join('')).toMatch(/usr_2\s+bob\s+no\s+yes/);
+  });
+
+  it('shows one user', async () => {
+    const cli = harness({ routes: userRoutes });
+
+    await cli.run('users', 'get', 'usr_1', '--env', 'staging');
+
+    expect(cli.api.get).toHaveBeenCalledWith('/projects/shop/users/usr_1', { organization: 'acme', query: { environment: 'staging' } });
+    expect(JSON.parse(cli.stdout.join(''))).toMatchObject({ id: 'usr_1' });
+  });
+
+  it('creates a user, asking for the password without echo', async () => {
+    const cli = harness({ interactive: true, routes: userRoutes });
+    cli.api.post.mockResolvedValueOnce({ id: 'usr_3', email: 'eve@acme.com' });
+
+    await cli.run('users', 'create', '--email', 'eve@acme.com', '--name', 'Eve', '--confirmed', '--password');
+
+    expect(cli.api.post).toHaveBeenCalledWith('/projects/shop/users', {
+      organization: 'acme',
+      query: { environment: 'main' },
+      body: { email: 'eve@acme.com', password: 'typed-secret', profile: { name: 'Eve' }, email_verified: true },
+    });
+    expect(cli.stderr.join('')).toContain('Created usr_3');
+  });
+
+  it('needs an email, phone or username to create a user', async () => {
+    const cli = harness({ routes: userRoutes });
+
+    await expect(cli.run('users', 'create')).rejects.toMatchObject({ message: 'Give the user an email, phone or username.' });
+  });
+
+  it.each([
+    ['ban', 'patch', '/projects/shop/users/usr_1/ban'],
+    ['unban', 'patch', '/projects/shop/users/usr_1/unban'],
+    ['delete', 'delete', '/projects/shop/users/usr_1'],
+    ['sign-out', 'delete', '/projects/shop/users/usr_1/sessions'],
+  ] as const)('%s calls the API after confirming', async (action, method, path) => {
+    const cli = harness({ routes: userRoutes });
+
+    await cli.run('users', action, 'usr_1', '--yes');
+
+    expect(cli.api[method]).toHaveBeenCalledWith(path, { organization: 'acme', query: { environment: 'main' } });
+  });
+
+  it('lists the sessions of a user', async () => {
+    const cli = harness({ routes: userRoutes });
+
+    await cli.run('users', 'sessions', 'usr_1');
+
+    expect(cli.stdout.join('')).toMatch(/ses_1\s+Firefox on Linux\s+aal2/);
+  });
+
+  it('lists and removes MFA factors', async () => {
+    const cli = harness({ routes: userRoutes });
+
+    await cli.run('users', 'factors', 'usr_1');
+    await cli.run('users', 'remove-factor', 'usr_1', 'fac_1', '--yes');
+
+    expect(cli.stdout.join('')).toMatch(/fac_1\s+totp/);
+    expect(cli.api.delete).toHaveBeenCalledWith('/projects/shop/users/usr_1/factors/fac_1', {
+      organization: 'acme',
+      query: { environment: 'main' },
+    });
+  });
+});
+
+describe('sudo', () => {
+  it('confirms the user and says how long sudo lasts', async () => {
+    const cli = harness();
+
+    await cli.run('sudo');
+
+    expect(cli.stderr.join('')).toContain('Sudo is active for 10 minutes.');
+  });
+
+  it('prints the remaining seconds as JSON', async () => {
+    const cli = harness();
+
+    await cli.run('sudo', '--json');
+
+    expect(JSON.parse(cli.stdout.join(''))).toEqual({ expires_in: 600 });
   });
 });
 

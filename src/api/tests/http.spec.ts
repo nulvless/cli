@@ -1,4 +1,4 @@
-import { ForbiddenError, SessionExpiredError } from '../../errors';
+import { ForbiddenError, SessionExpiredError, SudoRequiredError } from '../../errors';
 import { createApi } from '../http';
 import { resources } from '../resources';
 
@@ -48,6 +48,39 @@ describe('createApi', () => {
     const api = apiWith(jest.fn(async () => jsonResponse(401, { message: 'Unauthorized' })));
 
     await expect(api.get('/projects')).rejects.toBeInstanceOf(SessionExpiredError);
+  });
+
+  it('asks for sudo, then repeats the request once with the elevated token', async () => {
+    const tokens = ['token-1', 'token-2'];
+    const fetchImpl = jest
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(403, { message: 'Confirm it is you.', code: 'protected_action_denied' }))
+      .mockResolvedValueOnce(jsonResponse(201, { id: 'key_1' }));
+    const elevate = jest.fn(async () => {
+      tokens.shift();
+    });
+    const api = createApi({ baseUrl: 'https://api.example.com', token: async () => tokens[0]!, fetchImpl, elevate });
+
+    await expect(api.post('/keys', { body: { name: 'ci' } })).resolves.toEqual({ id: 'key_1' });
+
+    expect(elevate).toHaveBeenCalledTimes(1);
+    const [, retry] = fetchImpl.mock.calls[1] as [URL, RequestInit];
+    expect(retry.headers).toMatchObject({ Authorization: 'Bearer token-2' });
+  });
+
+  it('explains sudo when it cannot elevate', async () => {
+    const api = apiWith(jest.fn(async () => jsonResponse(403, { message: 'Confirm it is you.', code: 'protected_action_denied' })));
+
+    await expect(api.post('/keys')).rejects.toBeInstanceOf(SudoRequiredError);
+  });
+
+  it('does not loop when sudo is still denied after elevating', async () => {
+    const fetchImpl = jest.fn(async () => jsonResponse(403, { message: 'Confirm it is you.', code: 'protected_action_denied' }));
+    const elevate = jest.fn(async () => undefined);
+    const api = createApi({ baseUrl: 'https://api.example.com', token: async () => 't', fetchImpl, elevate });
+
+    await expect(api.post('/keys')).rejects.toBeInstanceOf(SudoRequiredError);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
   it('keeps the API message on 403', async () => {

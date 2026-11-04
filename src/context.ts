@@ -2,13 +2,14 @@ import pc from 'picocolors';
 import { createApi, type Api } from './api/http';
 import type { Scope } from './api/resources';
 import { refreshWith } from './auth/login';
+import { elevateSession, sudoClientFor } from './auth/sudo';
 import { defaultCredentialStore, type CredentialStore } from './credentials/credential-store';
 import { accessToken } from './credentials/session';
 import type { FetchText } from './examples';
 import { CancelledError, CliError, SessionExpiredError, TokenRejectedError } from './errors';
 import { createOutput, type Output } from './output';
 import { platformFrom, type Platform } from './platform';
-import { resolveScope } from './scope';
+import { resolveOrganization, resolveScope } from './scope';
 import { isInteractive, terminalPrompter, type Prompter } from './ui/prompter';
 import { supportsHyperlinks } from './ui/style';
 import { findWorkspace, readWorkspaceConfig } from './workspace';
@@ -30,11 +31,18 @@ export interface Context {
   store: CredentialStore;
   api: Api;
   token(): Promise<string>;
+  elevate(): Promise<{ expiresIn: number }>;
   scope(): Promise<Scope>;
+  organization(): Promise<string>;
   confirm(message: string): Promise<void>;
 }
 
 export type ContextFactory = (flags: GlobalFlags) => Promise<Context>;
+
+export function sudoMinutes(seconds: number) {
+  const minutes = Math.max(1, Math.round(seconds / 60));
+  return minutes === 1 ? '1 minute' : `${minutes} minutes`;
+}
 
 export async function confirmAction(flags: GlobalFlags, prompter: Prompter, message: string) {
   if (flags.yes) return;
@@ -49,15 +57,41 @@ export const createContext: ContextFactory = async (flags) => {
   const store = await defaultCredentialStore(env);
   const prompter = terminalPrompter(isInteractive(env));
   const token = () => accessToken({ env, store, refresh: refreshWith(platform) });
+  const output = createOutput(Boolean(flags.json), process, {
+    decorated: !flags.json && Boolean(process.stderr.isTTY) && !env.CI,
+    hyperlinks: supportsHyperlinks(env),
+  });
+
+  const confirmIdentity = async () => {
+    if (env.NULVLESS_TOKEN) {
+      throw new CliError('Sudo cannot be confirmed with NULVLESS_TOKEN.', {
+        hint: 'Run the command signed in with `nulvless login`, or unset NULVLESS_TOKEN.',
+      });
+    }
+    const client = sudoClientFor(platform, await token());
+    try {
+      return await elevateSession({ client, store, prompter });
+    } finally {
+      client.dispose?.();
+    }
+  };
+
+  const elevateForRequest = async () => {
+    output.info('This action needs you to confirm it is you.');
+    const { expiresIn } = await confirmIdentity();
+    output.success(`Confirmed. Sudo stays active for ${sudoMinutes(expiresIn)}.`);
+  };
+
+  const workspaceLink = async () => {
+    const workspace = await findWorkspace(cwd);
+    return workspace ? readWorkspaceConfig(workspace) : {};
+  };
+
   const api = createApi({
     baseUrl: platform.apiUrl,
     token,
     unauthorized: () => (env.NULVLESS_TOKEN ? new TokenRejectedError() : new SessionExpiredError()),
-  });
-
-  const output = createOutput(Boolean(flags.json), process, {
-    decorated: !flags.json && Boolean(process.stderr.isTTY) && !env.CI,
-    hyperlinks: supportsHyperlinks(env),
+    ...(prompter.interactive && !env.NULVLESS_TOKEN ? { elevate: elevateForRequest } : {}),
   });
 
   return {
@@ -70,10 +104,10 @@ export const createContext: ContextFactory = async (flags) => {
     store,
     api,
     token,
+    elevate: confirmIdentity,
+    organization: async () => resolveOrganization({ flags, env, linked: await workspaceLink(), api, prompter }),
     scope: async () => {
-      const workspace = await findWorkspace(cwd);
-      const linked = workspace ? await readWorkspaceConfig(workspace) : {};
-      const scope = await resolveScope({ flags, env, linked, api, prompter });
+      const scope = await resolveScope({ flags, env, linked: await workspaceLink(), api, prompter });
       output.step(`Project ${pc.bold(scope.project)} ${pc.dim(`in ${scope.organization}`)}`);
       return scope;
     },

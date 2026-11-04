@@ -1,4 +1,4 @@
-import { confirm, isCancel, password, select } from '@clack/prompts';
+import { confirm, isCancel, password, select, text } from '@clack/prompts';
 import { CancelledError } from '../errors';
 
 export interface Choice<T> {
@@ -12,6 +12,7 @@ export interface Prompter {
   choose<T>(message: string, choices: Choice<T>[]): Promise<T>;
   confirm(message: string): Promise<boolean>;
   secret(message: string): Promise<string>;
+  text(message: string): Promise<string>;
 }
 
 function answered<T>(value: T | symbol): T {
@@ -39,6 +40,9 @@ export function terminalPrompter(interactive: boolean): Prompter {
     },
     async secret(message) {
       return answered(await password({ message }));
+    },
+    async text(message) {
+      return answered(await text({ message }));
     },
   };
 }

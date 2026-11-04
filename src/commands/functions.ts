@@ -49,6 +49,7 @@ export function registerFunctionCommands(program: Command, context: ContextFacto
         'nulvless fn new checkout',
         'nulvless fn new whoami --template verify-session',
         'nulvless fn deploy',
+        'nulvless fn pull checkout',
         'nulvless fn list --project shop',
         'nulvless fn deployments checkout',
         'nulvless fn promote checkout v2',
@@ -134,6 +135,40 @@ export function registerFunctionCommands(program: Command, context: ContextFacto
       }
 
       if (output.json) output.data(results);
+    });
+
+  functions
+    .command('pull')
+    .description('Write the code of existing Edge Functions into the workspace')
+    .argument('[slugs...]', 'functions to pull (default: every function of the project)')
+    .action(async (slugs: string[], _options, command: Command) => {
+      const { api, cwd, scope, output, confirm } = await context(command.optsWithGlobals());
+
+      const root = await findWorkspace(cwd);
+      if (!root) throw NO_WORKSPACE();
+
+      const target = await scope();
+      const selected = slugs.length
+        ? slugs
+        : (await output.task('Loading functions', () => resources.functions(api, target))).map((fn) => fn.slug);
+      if (!selected.length) throw new CliError(`${target.project} has no Edge Functions yet.`);
+
+      const existing = [];
+      for (const slug of selected) {
+        if (await pathExists(join(root, WORKSPACE_DIR, FUNCTIONS_DIR, slug))) existing.push(slug);
+      }
+      if (existing.length) await confirm(`Overwrite ${existing.join(', ')} in ${WORKSPACE_DIR}/${FUNCTIONS_DIR}?`);
+
+      const pulled = [];
+      for (const slug of selected) {
+        const { files } = await output.task(`Pulling ${slug}`, () => resources.functionSource(api, target, slug));
+        const path = `${WORKSPACE_DIR}/${FUNCTIONS_DIR}/${slug}`;
+        await writeFiles(join(root, path), files);
+        pulled.push({ slug, path, files: files.map((file) => file.path) });
+      }
+
+      if (output.json) return output.data(pulled);
+      output.success(`Pulled ${pulled.length} function(s) into ${WORKSPACE_DIR}/${FUNCTIONS_DIR}.`);
     });
 
   functions

@@ -52,6 +52,15 @@ export class ForbiddenError extends CliError {
   }
 }
 
+export class SudoRequiredError extends CliError {
+  constructor() {
+    super('This action needs you to confirm it is you (sudo).', {
+      exitCode: ExitCode.Unauthorized,
+      hint: 'Run `nulvless sudo` in a terminal, then run the command again.',
+    });
+  }
+}
+
 export class MissingOptionError extends CliError {
   constructor(what: string, flag: string, variable: string) {
     super(`No ${what} selected.`, { hint: `Pass ${flag} or set ${variable}.` });
