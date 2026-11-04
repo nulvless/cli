@@ -7,7 +7,6 @@ import { listenForCallback } from './loopback';
 import { codeChallenge, randomState, randomVerifier } from './pkce';
 
 const SCOPE = 'openid email profile';
-const FRESH_SIGN_IN = 'login';
 const LOGIN_TIMEOUT_MS = 5 * 60_000;
 
 async function withPlatformClient<T>(platform: Platform, run: (client: ReturnType<typeof createClient>) => Promise<T>) {
@@ -55,10 +54,8 @@ export async function login({
       });
       if (authorization.error) throw new SignInError(`Could not start the sign-in: ${messageOf(authorization.error)}`);
 
-      const signInUrl = new URL(authorization.data.url);
-      signInUrl.searchParams.set('prompt', FRESH_SIGN_IN);
-      showUrl(signInUrl.toString());
-      await openBrowser(signInUrl.toString()).catch(() => undefined);
+      showUrl(authorization.data.url);
+      await openBrowser(authorization.data.url).catch(() => undefined);
 
       const code = await waitForApproval(callback.code);
       const { data, error } = await client.auth.oauth.exchangeCodeForToken({
