@@ -1,17 +1,32 @@
 import { readdir } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { Option, type Command } from 'commander';
+import { resources } from '../api/resources';
 import type { ContextFactory, GlobalFlags } from '../context';
+import { environmentOption } from '../environment-option';
 import { CliError } from '../errors';
 import { downloadExample, fetchCatalog, findExample, type ExampleKind } from '../examples';
+import { templatePath, workspaceTemplatesOf, writeTemplate } from '../templates';
 import { examples } from '../ui/help';
-import { initWorkspace, writeFiles, type WorkspaceLink } from '../workspace';
+import {
+  findWorkspace,
+  FUNCTIONS_DIR,
+  initWorkspace,
+  pathExists,
+  WORKSPACE_DIR,
+  writeFiles,
+  type WorkspaceLink,
+} from '../workspace';
 
 function linkFrom(flags: GlobalFlags): WorkspaceLink {
   return {
     ...(flags.org ? { organization: flags.org } : {}),
     ...(flags.project ? { project: flags.project } : {}),
   };
+}
+
+function plural(count: number, one: string, many: string) {
+  return `${count} ${count === 1 ? one : many}`;
 }
 
 async function isEmptyOrMissing(directory: string) {
@@ -35,6 +50,68 @@ export function registerWorkspaceCommands(program: Command, context: ContextFact
       if (output.json) return output.data({ root: cwd, files });
       output.success('Created the Nulvless workspace in nulvless/.');
       output.note('Next: nulvless functions new hello');
+    });
+
+  program
+    .command('pull')
+    .description("Write the project's Edge Functions and an environment's own templates into the workspace")
+    .addOption(environmentOption())
+    .addHelpText('after', examples(['nulvless pull', 'nulvless pull --env staging --yes']))
+    .action(async (options: { env: string }, command: Command) => {
+      const { api, cwd, scope, output, confirm } = await context(command.optsWithGlobals());
+
+      const root = await findWorkspace(cwd);
+      if (!root) throw new CliError('There is no Nulvless workspace here.', { hint: 'Run `nulvless init` first.' });
+
+      const target = await scope();
+      const [functions, stored] = await output.task('Loading functions and templates', () =>
+        Promise.all([resources.functions(api, target), resources.projectTemplates(api, target, options.env)]),
+      );
+      const functionPaths = functions.map((fn) => ({ slug: fn.slug, path: `${WORKSPACE_DIR}/${FUNCTIONS_DIR}/${fn.slug}` }));
+      const templates = workspaceTemplatesOf(stored).map((template) => ({
+        template,
+        path: templatePath(template.channel, template.slug),
+      }));
+
+      if (!functionPaths.length && !templates.length) {
+        if (output.json) return output.data({ environment: options.env, functions: [], templates: [] });
+        output.info(
+          `Nothing to pull: ${target.project} has no Edge Functions and ${options.env} has no templates of its own.`,
+        );
+        return;
+      }
+
+      const overwritten = [];
+      for (const { path } of [...functionPaths, ...templates]) {
+        if (await pathExists(join(root, path))) overwritten.push(path);
+      }
+      if (overwritten.length) await confirm(`Overwrite ${overwritten.join(', ')}?`);
+
+      const pulledFunctions = [];
+      for (const { slug, path } of functionPaths) {
+        const { files } = await output.task(`Pulling ${slug}`, () => resources.functionSource(api, target, slug));
+        await writeFiles(join(root, path), files);
+        pulledFunctions.push({ slug, path, files: files.map((file) => file.path) });
+      }
+      for (const { template } of templates) await writeTemplate(root, template);
+
+      if (output.json) {
+        return output.data({
+          environment: options.env,
+          functions: pulledFunctions,
+          templates: templates.map(({ template, path }) => ({
+            slug: template.slug,
+            channel: template.channel,
+            path,
+            languages: template.versions.map((version) => version.language),
+          })),
+        });
+      }
+      const pulled = [
+        ...(functionPaths.length ? [plural(functionPaths.length, 'function', 'functions')] : []),
+        ...(templates.length ? [plural(templates.length, 'template', 'templates')] : []),
+      ];
+      output.success(`Pulled ${pulled.join(' and ')} from ${options.env}.`);
     });
 
   program

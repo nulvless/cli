@@ -1,5 +1,6 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import type { StoredTemplate } from './api/resources';
 import { CliError } from './errors';
 import type { ExampleFile } from './examples';
 import { pathExists, WORKSPACE_DIR, writeFiles } from './workspace';
@@ -41,6 +42,28 @@ export interface WorkspaceTemplate {
 interface TemplateLocation {
   channel: TemplateChannel;
   slug: string;
+}
+
+export function workspaceTemplatesOf(stored: StoredTemplate[]): WorkspaceTemplate[] {
+  const templates = new Map<string, WorkspaceTemplate>();
+
+  for (const entry of stored) {
+    const template = templates.get(entry.slug) ?? {
+      slug: entry.slug,
+      channel: entry.channel,
+      ...(!entry.common && entry.name ? { name: entry.name } : {}),
+      ...(!entry.common && entry.description ? { description: entry.description } : {}),
+      versions: [],
+    };
+    template.versions.push({
+      language: entry.language,
+      ...(entry.subject ? { subject: entry.subject } : {}),
+      content: entry.content,
+    });
+    templates.set(entry.slug, template);
+  }
+
+  return [...templates.values()];
 }
 
 export function templatePath(channel: TemplateChannel, slug: string) {

@@ -590,6 +590,83 @@ describe('templates list', () => {
   });
 });
 
+describe('pull', () => {
+  const sources = {
+    '/projects/shop/functions': { items: [{ slug: 'checkout' }, { slug: 'hello' }], total: 2 },
+    '/projects/shop/functions/checkout/source': { files: [{ path: 'index.ts', content: 'checkout' }] },
+    '/projects/shop/functions/hello/source': { files: [{ path: 'index.ts', content: 'hello' }] },
+  };
+  const stored = [
+    { slug: 'welcome-user', channel: 'email', language: 'en-US', subject: 'Hello', content: '<p>Hello</p>', common: true },
+  ];
+
+  async function workspace(templates = stored, routes: Record<string, unknown> = sources) {
+    const cli = await harness({}, [], templates, routes);
+    await cli.run('init');
+    return cli;
+  }
+
+  it('writes every function and the environment templates in one go', async () => {
+    const cli = await workspace();
+
+    await cli.run('pull');
+
+    await expect(readFile(join(cli.cwd, 'nulvless/functions/checkout/index.ts'), 'utf8')).resolves.toBe('checkout');
+    await expect(readFile(join(cli.cwd, 'nulvless/templates/email/welcome-user/en-US.html'), 'utf8')).resolves.toBe('<p>Hello</p>');
+    expect(cli.stderr.join('')).toContain('Pulled 2 functions and 1 template from main.');
+  });
+
+  it('reads the templates of the chosen environment', async () => {
+    const cli = await workspace();
+
+    await cli.run('pull', '--env', 'staging');
+
+    expect(cli.api.get).toHaveBeenCalledWith('/projects/shop/staging/templates', {
+      organization: 'acme',
+      query: { source: 'project', page: 1, page_size: 100 },
+    });
+    expect(cli.stderr.join('')).toContain('from staging.');
+  });
+
+  it('asks once before overwriting anything in the workspace', async () => {
+    const cli = await workspace();
+    await cli.run('functions', 'new', 'hello');
+
+    await expect(cli.run('pull')).rejects.toMatchObject({ hint: 'Pass --yes to confirm without a prompt.' });
+    await expect(readFile(join(cli.cwd, 'nulvless/functions/hello/index.ts'), 'utf8')).resolves.toContain('handler');
+    await expect(stat(join(cli.cwd, 'nulvless/templates'))).rejects.toThrow();
+  });
+
+  it('lists what it wrote as JSON', async () => {
+    const cli = await workspace();
+
+    await cli.run('pull', '--json');
+
+    expect(JSON.parse(cli.stdout.join(''))).toEqual({
+      environment: 'main',
+      functions: [
+        { slug: 'checkout', path: 'nulvless/functions/checkout', files: ['index.ts'] },
+        { slug: 'hello', path: 'nulvless/functions/hello', files: ['index.ts'] },
+      ],
+      templates: [{ slug: 'welcome-user', channel: 'email', path: 'nulvless/templates/email/welcome-user', languages: ['en-US'] }],
+    });
+  });
+
+  it('says so when there is nothing to pull', async () => {
+    const cli = await workspace([], { '/projects/shop/functions': { items: [], total: 0 } });
+
+    await cli.run('pull');
+
+    expect(cli.stderr.join('')).toContain('Nothing to pull: shop has no Edge Functions and main has no templates of its own.');
+  });
+
+  it('needs a workspace', async () => {
+    const cli = await harness({}, [], stored, sources);
+
+    await expect(cli.run('pull')).rejects.toMatchObject({ message: 'There is no Nulvless workspace here.' });
+  });
+});
+
 describe('functions pull', () => {
   const sources = {
     '/projects/shop/functions': { items: [{ slug: 'checkout' }, { slug: 'hello' }], total: 2 },

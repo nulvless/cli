@@ -11,10 +11,10 @@ import {
   TEMPLATE_SLUG,
   templateFilesFor,
   templatePath,
+  workspaceTemplatesOf,
   TEMPLATES_PATH,
   writeTemplate,
   type TemplateChannel,
-  type WorkspaceTemplate,
 } from '../templates';
 import { examples } from '../ui/help';
 import { findWorkspace, pathExists, writeFiles } from '../workspace';
@@ -34,28 +34,6 @@ async function requireWorkspace(cwd: string) {
   return root;
 }
 
-function groupBySlug(stored: StoredTemplate[]): WorkspaceTemplate[] {
-  const templates = new Map<string, WorkspaceTemplate>();
-
-  for (const entry of stored) {
-    const template = templates.get(entry.slug) ?? {
-      slug: entry.slug,
-      channel: entry.channel,
-      ...(!entry.common && entry.name ? { name: entry.name } : {}),
-      ...(!entry.common && entry.description ? { description: entry.description } : {}),
-      versions: [],
-    };
-    template.versions.push({
-      language: entry.language,
-      ...(entry.subject ? { subject: entry.subject } : {}),
-      content: entry.content,
-    });
-    templates.set(entry.slug, template);
-  }
-
-  return [...templates.values()];
-}
-
 interface TemplateRow {
   slug: string;
   channel: string;
@@ -72,7 +50,7 @@ function templateRows(platform: PlatformTemplate[], own: StoredTemplate[]): Temp
       kind: template.overrides.length ? 'customized' : 'default',
       languages: template.overrides,
     }));
-  const custom: TemplateRow[] = groupBySlug(own.filter((entry) => !entry.common)).map((template) => ({
+  const custom: TemplateRow[] = workspaceTemplatesOf(own.filter((entry) => !entry.common)).map((template) => ({
     slug: template.slug,
     channel: template.channel,
     kind: 'custom',
@@ -238,7 +216,7 @@ export function registerTemplateCommands(program: Command, context: ContextFacto
       const stored = await output.task(`Loading templates of ${env}`, () =>
         resources.projectTemplates(api, target, env),
       );
-      const pulled = groupBySlug(stored.filter((entry) => !slugs.length || slugs.includes(entry.slug)));
+      const pulled = workspaceTemplatesOf(stored.filter((entry) => !slugs.length || slugs.includes(entry.slug)));
       if (!pulled.length) {
         throw new CliError(`${env} has no templates of its own yet.`, {
           hint: 'Change one in the console, or create one with `nulvless templates new` and push it.',

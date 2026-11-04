@@ -1,6 +1,6 @@
 {
   "name": "@nulvless/cli",
-  "version": "0.3.6",
+  "version": "0.3.7",
   "description": "Command line interface for Nulvless",
   "type": "module",
   "license": "MIT",
