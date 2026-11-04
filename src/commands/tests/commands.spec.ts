@@ -732,6 +732,36 @@ describe('oauth', () => {
     });
   });
 
+  it('asks for a fresh sign-in after the default max age', async () => {
+    const cli = harness({ routes: oauthRoutes });
+
+    await cli.run('oauth', 'clients', 'update', 'cli_1', '--default-max-age', '3600');
+
+    expect(cli.api.put).toHaveBeenCalledWith(
+      '/projects/shop/main/oauth/clients/cli_1',
+      expect.objectContaining({ body: expect.objectContaining({ default_max_age: 3600 }) }),
+    );
+  });
+
+  it('turns the default max age off', async () => {
+    const cli = harness({ routes: oauthRoutes });
+
+    await cli.run('oauth', 'clients', 'update', 'cli_1', '--no-default-max-age');
+
+    expect(cli.api.put).toHaveBeenCalledWith(
+      '/projects/shop/main/oauth/clients/cli_1',
+      expect.objectContaining({ body: expect.objectContaining({ default_max_age: null }) }),
+    );
+  });
+
+  it('refuses a default max age that is not whole seconds', async () => {
+    const cli = harness({ routes: oauthRoutes });
+
+    await expect(cli.run('oauth', 'clients', 'update', 'cli_1', '--default-max-age', '1h')).rejects.toMatchObject({
+      message: '1h is not a number of seconds.',
+    });
+  });
+
   it('rotates a secret after confirming', async () => {
     const cli = harness({ routes: oauthRoutes });
     cli.api.post.mockResolvedValueOnce({ client_id: 'cli_1', client_secret: 'new-secret' });

@@ -15,6 +15,7 @@ interface ClientFlags extends EnvironmentFlag {
   redirectUri?: string[];
   clientUri?: string;
   logoUri?: string;
+  defaultMaxAge?: string | false;
   refreshTokens?: boolean;
 }
 
@@ -25,6 +26,15 @@ const AUTH_METHOD: Record<'public' | 'confidential', string> = {
 
 const collect = (value: string, previous: string[] = []) => [...previous, value];
 
+function defaultMaxAge(value: string | false | undefined) {
+  if (value === undefined) return {};
+  if (value === false) return { default_max_age: null };
+  if (!/^\d+$/.test(value)) {
+    throw new CliError(`${value} is not a number of seconds.`, { hint: 'Pass whole seconds, such as --default-max-age 3600.' });
+  }
+  return { default_max_age: Number(value) };
+}
+
 function grantTypes(refreshTokens: boolean | undefined) {
   return refreshTokens === false ? ['authorization_code'] : ['authorization_code', 'refresh_token'];
 }
@@ -34,6 +44,8 @@ function clientOptions(command: Command) {
     .option('--redirect-uri <uri>', 'allowed redirect URI, exact match (repeat for more)', collect)
     .option('--client-uri <url>', 'home page shown on the consent screen')
     .option('--logo-uri <url>', 'logo shown on the consent screen')
+    .option('--default-max-age <seconds>', 'ask users to sign in again when their last sign-in is older than this')
+    .option('--no-default-max-age', 'stop asking users to sign in again on a schedule')
     .option('--no-refresh-tokens', 'do not issue refresh tokens to this app')
     .addOption(environmentOption());
 }
@@ -193,6 +205,7 @@ export function registerOAuthCommands(program: Command, context: ContextFactory)
         grant_types: grantTypes(options.refreshTokens),
         ...(options.clientUri ? { client_uri: options.clientUri } : {}),
         ...(options.logoUri ? { logo_uri: options.logoUri } : {}),
+        ...defaultMaxAge(options.defaultMaxAge),
       }),
     );
 
@@ -222,6 +235,7 @@ export function registerOAuthCommands(program: Command, context: ContextFactory)
         grant_types: refreshPassed ? grantTypes(options.refreshTokens) : current.grant_types,
         ...(options.clientUri ? { client_uri: options.clientUri } : {}),
         ...(options.logoUri ? { logo_uri: options.logoUri } : {}),
+        ...defaultMaxAge(options.defaultMaxAge),
       }),
     );
 

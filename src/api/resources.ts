@@ -93,6 +93,7 @@ export interface OAuthClient {
   grant_types?: string[];
   client_uri?: string | null;
   logo_uri?: string | null;
+  default_max_age?: number | null;
   client_secret?: string | null;
   created_at?: string | null;
 }

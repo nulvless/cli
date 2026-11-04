@@ -83,6 +83,7 @@ describe('login', () => {
     expect(exchangeCodeForToken.mock.calls[0]?.[0].code_verifier).toEqual(expect.any(String));
     expect(store.current).toMatchObject({ accessToken: 'access-1', refreshToken: 'refresh-1' });
     expect(shown).toHaveLength(1);
+    expect(new URL(shown[0]!).searchParams.get('prompt')).toBe('login');
     expect(dispose).toHaveBeenCalled();
   });
 
