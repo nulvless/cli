@@ -27,7 +27,7 @@ interface CreateFlags extends EnvironmentFlag {
   confirmed?: boolean;
 }
 
-type UserAction = 'ban' | 'unban' | 'delete' | 'sign-out';
+type UserAction = 'ban' | 'unban' | 'delete';
 
 const USER_ACTIONS: { action: UserAction; description: string; question: (id: string) => string; done: string }[] = [
   {
@@ -47,12 +47,6 @@ const USER_ACTIONS: { action: UserAction; description: string; question: (id: st
     description: 'Delete a user and their identities, sessions and factors',
     question: (id) => `Delete ${id} with their identities, sessions and factors? This cannot be undone.`,
     done: 'is deleted',
-  },
-  {
-    action: 'sign-out',
-    description: 'End every session of a user',
-    question: (id) => `Sign ${id} out of every device?`,
-    done: 'is signed out everywhere',
   },
 ];
 
@@ -197,6 +191,29 @@ export function registerUserCommands(program: Command, context: ContextFactory) 
         output.success(`${id} ${done}.`);
       });
   }
+
+  users
+    .command('sign-out')
+    .description('End every session of a user, or one with --session')
+    .argument('<id>', 'user id')
+    .option('--session <session-id>', 'only this session, from `users sessions`')
+    .addOption(environmentOption())
+    .action(async (id: string, options: EnvironmentFlag & { session?: string }, command: Command) => {
+      const { api, scope, output, confirm } = await context(command.optsWithGlobals());
+
+      const target = await scope();
+      const where = environmentLabel(options.env);
+      if (options.session) {
+        const session = options.session;
+        await confirm(`End session ${session} of ${id}? That device is signed out. (${where})`);
+        await output.task(`Ending ${session}`, () => resources.endUserSession(api, target, options.env, id, session));
+        return output.success(`Ended session ${session} of ${id}.`);
+      }
+
+      await confirm(`Sign ${id} out of every device? (${where})`);
+      await output.task(`Signing out ${id}`, () => resources.userAction(api, target, options.env, id, 'sign-out'));
+      output.success(`${id} is signed out everywhere.`);
+    });
 
   users
     .command('sessions')

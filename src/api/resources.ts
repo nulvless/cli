@@ -325,6 +325,12 @@ export const resources = {
       { organization: scope.organization },
     ),
 
+  deleteTemplate: (api: Api, scope: Scope, environment: string, template: ListedTemplate) =>
+    api.delete(
+      `${templatesPath(scope, environment)}/${template.channel}/${encodeURIComponent(template.slug)}/${template.language}`,
+      { organization: scope.organization },
+    ),
+
   platformTemplates: (api: Api, scope: Scope, environment: string, filters: Record<string, string>) =>
     api.get<Page<PlatformTemplate>>(templatesPath(scope, environment), {
       organization: scope.organization,
@@ -512,6 +518,12 @@ export const resources = {
     if (action === 'ban' || action === 'unban') return api.patch(`${path}/${action}`, request);
     return api.delete(action === 'sign-out' ? `${path}/sessions` : path, request);
   },
+
+  endUserSession: (api: Api, scope: Scope, environment: string, id: string, sessionId: string) =>
+    api.delete(`${usersPath(scope)}/${encodeURIComponent(id)}/sessions/${encodeURIComponent(sessionId)}`, {
+      organization: scope.organization,
+      query: { environment },
+    }),
 
   userSessions: (api: Api, scope: Scope, environment: string, id: string) =>
     api.get<UserSession[]>(`${usersPath(scope)}/${encodeURIComponent(id)}/sessions`, {

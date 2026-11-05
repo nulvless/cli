@@ -6,6 +6,7 @@ import type { ContextFactory } from '../context';
 import { CliError, forItem } from '../errors';
 import { downloadExample, fetchCatalog, findExample } from '../examples';
 import {
+  languageFile,
   readTemplates,
   starterTemplate,
   TEMPLATE_CHANNELS,
@@ -244,5 +245,70 @@ export function registerTemplateCommands(program: Command, context: ContextFacto
         return output.data(pulled.map((template) => ({ slug: template.slug, channel: template.channel, languages: template.versions.map((entry) => entry.language) })));
       }
       output.success(`Pulled ${pulled.length} template(s) from ${env} into ${TEMPLATES_PATH}.`);
+    });
+
+  templates
+    .command('delete')
+    .description('Delete a template from an environment, in every language or one')
+    .argument('<template>', 'template slug, or channel/slug when it is in both channels')
+    .addOption(environmentOption())
+    .option('--language <language>', 'only this language, such as pt-BR')
+    .action(async (selector: string, options: { env?: string; language?: string }, command: Command) => {
+      const { api, cwd, scope, output, confirm } = await context(command.optsWithGlobals());
+
+      const env = requireEnvironment(options.env);
+      const target = await scope();
+      const [listed, commons] = await output.task(`Loading templates of ${env}`, () =>
+        Promise.all([resources.projectTemplates(api, target, env), resources.commonTemplates(api, target)]),
+      );
+
+      const matching = listed.filter(
+        (template) =>
+          (selector === template.slug || selector === templateKey(template)) &&
+          (!options.language || template.language === options.language),
+      );
+      if (!matching.length) {
+        throw new CliError(`${env} has no template ${selector}${options.language ? ` in ${options.language}` : ''}.`, {
+          hint: `Run \`nulvless templates list --env ${env}\` to see them.`,
+        });
+      }
+      const channels = [...new Set(matching.map((template) => template.channel))];
+      if (channels.length > 1) {
+        throw new CliError(`${selector} is in ${channels.join(' and ')}.`, {
+          hint: `Pass ${channels.map((channel) => `${channel}/${selector}`).join(' or ')}.`,
+        });
+      }
+
+      const key = templateKey(matching[0]!);
+      const languages = matching.map((template) => template.language);
+      const platformDefault = (commons[matching[0]!.channel] ?? []).some((entry) => entry.key === matching[0]!.slug);
+      const fallbackStays = listed.some(
+        (template) => templateKey(template) === key && template.language === 'en-US' && !languages.includes('en-US'),
+      );
+      const consequence = platformDefault
+        ? 'Nulvless goes back to sending its default.'
+        : fallbackStays
+          ? `Messages in ${languages.join(', ')} fall back to en-US.`
+          : 'Messages sent with it stop working.';
+      await confirm(`Delete ${key} (${languages.join(', ')}) from ${env}? ${consequence}`);
+
+      for (const template of matching) {
+        await forItem(
+          `${template.slug} (${template.language})`,
+          output.task(`Deleting ${template.slug} (${template.language})`, () =>
+            resources.deleteTemplate(api, target, env, template),
+          ),
+        );
+      }
+
+      if (output.json) return output.data(matching);
+      output.success(`Deleted ${key} (${languages.join(', ')}) from ${env}.`);
+
+      const root = await findWorkspace(cwd);
+      if (!root) return;
+      for (const template of matching) {
+        const file = `${templatePath(template.channel, template.slug)}/${languageFile(template.channel, template.language)}`;
+        if (await pathExists(join(root, file))) output.note(`${file} is still in the workspace; the next push sends it back.`);
+      }
     });
 }

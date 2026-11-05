@@ -64,6 +64,10 @@ export function workspaceTemplatesOf(stored: StoredTemplate[]): WorkspaceTemplat
   return [...templates.values()];
 }
 
+export function languageFile(channel: TemplateChannel, language: string) {
+  return `${language}.${EXTENSIONS[channel]}`;
+}
+
 export function templatePath(channel: TemplateChannel, slug: string) {
   return `${TEMPLATES_PATH}/${channel}/${slug}`;
 }
@@ -176,7 +180,6 @@ export async function readTemplates(root: string, selectors: string[] = []): Pro
 }
 
 export async function writeTemplate(root: string, template: WorkspaceTemplate) {
-  const extension = EXTENSIONS[template.channel];
   const subjects = template.versions.filter((version) => version.subject);
   const settings: TemplateSettings = {
     ...(template.name ? { name: template.name } : {}),
@@ -188,7 +191,7 @@ export async function writeTemplate(root: string, template: WorkspaceTemplate) {
     join(root, templatePath(template.channel, template.slug)),
     templateFilesFor(
       settings,
-      template.versions.map((version) => ({ path: `${version.language}.${extension}`, content: version.content })),
+      template.versions.map((version) => ({ path: languageFile(template.channel, version.language), content: version.content })),
     ),
   );
 }

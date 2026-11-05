@@ -1093,6 +1093,26 @@ describe('users', () => {
     expect(cli.api[method]).toHaveBeenCalledWith(path, { organization: 'acme', query: { environment: 'main' } });
   });
 
+  it('ends only one session with --session', async () => {
+    const cli = harness({ routes: userRoutes });
+
+    await cli.run('users', 'sign-out', 'usr_1', '--session', 'ses_1', '--yes');
+
+    expect(cli.api.delete).toHaveBeenCalledWith('/projects/shop/users/usr_1/sessions/ses_1', {
+      organization: 'acme',
+      query: { environment: 'main' },
+    });
+    expect(cli.stderr.join('')).toContain('Ended session ses_1 of usr_1.');
+  });
+
+  it('names the session when asking to end it', async () => {
+    const cli = harness({ routes: userRoutes });
+
+    await expect(cli.run('users', 'sign-out', 'usr_1', '--session', 'ses_1')).rejects.toMatchObject({
+      message: 'End session ses_1 of usr_1? That device is signed out. (production (main))',
+    });
+  });
+
   it('lists the sessions of a user', async () => {
     const cli = harness({ routes: userRoutes });
 

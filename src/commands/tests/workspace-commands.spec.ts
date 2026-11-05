@@ -703,6 +703,98 @@ describe('pull', () => {
   });
 });
 
+describe('templates delete', () => {
+  const own = [
+    { slug: 'order-shipped', channel: 'sms', language: 'en-US', content: 'Shipped' },
+    { slug: 'order-shipped', channel: 'sms', language: 'pt-BR', content: 'Enviado' },
+    { slug: 'welcome-user', channel: 'email', language: 'en-US', subject: 'Hello', content: '<p>Hi</p>' },
+    { slug: 'code', channel: 'email', language: 'en-US', subject: 'Code', content: 'a' },
+    { slug: 'code', channel: 'sms', language: 'en-US', content: 'b' },
+  ];
+
+  it('deletes every language of a template after confirming', async () => {
+    const cli = await harness({}, [], own);
+
+    await cli.run('templates', 'delete', 'order-shipped', '--env', 'staging', '--yes');
+
+    expect(cli.api.delete).toHaveBeenCalledWith('/projects/shop/staging/templates/sms/order-shipped/en-US', { organization: 'acme' });
+    expect(cli.api.delete).toHaveBeenCalledWith('/projects/shop/staging/templates/sms/order-shipped/pt-BR', { organization: 'acme' });
+    expect(cli.stderr.join('')).toContain('Deleted sms/order-shipped (en-US, pt-BR) from staging.');
+  });
+
+  it('deletes only the language passed', async () => {
+    const cli = await harness({}, [], own);
+
+    await cli.run('templates', 'delete', 'order-shipped', '--env', 'staging', '--language', 'pt-BR', '--yes');
+
+    expect(cli.api.delete).toHaveBeenCalledTimes(1);
+    expect(cli.api.delete).toHaveBeenCalledWith('/projects/shop/staging/templates/sms/order-shipped/pt-BR', { organization: 'acme' });
+  });
+
+  it('says the deleted language falls back to en-US when en-US stays', async () => {
+    const cli = await harness({}, [], own);
+
+    await expect(cli.run('templates', 'delete', 'order-shipped', '--env', 'main', '--language', 'pt-BR')).rejects.toMatchObject({
+      message: 'Delete sms/order-shipped (pt-BR) from main? Messages in pt-BR fall back to en-US.',
+    });
+  });
+
+  it('says messages stop when nothing is left to send', async () => {
+    const cli = await harness({}, [], own);
+
+    await expect(cli.run('templates', 'delete', 'order-shipped', '--env', 'main')).rejects.toMatchObject({
+      message: 'Delete sms/order-shipped (en-US, pt-BR) from main? Messages sent with it stop working.',
+    });
+  });
+
+  it('says the platform default comes back when deleting a customization', async () => {
+    const cli = await harness({}, [], own);
+
+    await expect(cli.run('templates', 'delete', 'welcome-user', '--env', 'main')).rejects.toMatchObject({
+      message: 'Delete email/welcome-user (en-US) from main? Nulvless goes back to sending its default.',
+    });
+    expect(cli.api.delete).not.toHaveBeenCalled();
+  });
+
+  it('asks which channel when the slug is in both', async () => {
+    const cli = await harness({}, [], own);
+
+    await expect(cli.run('templates', 'delete', 'code', '--env', 'main', '--yes')).rejects.toMatchObject({
+      message: 'code is in email and sms.',
+      hint: 'Pass email/code or sms/code.',
+    });
+  });
+
+  it('says so when the environment has no such template', async () => {
+    const cli = await harness({}, [], own);
+
+    await expect(cli.run('templates', 'delete', 'ghost', '--env', 'main', '--yes')).rejects.toMatchObject({
+      message: 'main has no template ghost.',
+      hint: 'Run `nulvless templates list --env main` to see them.',
+    });
+  });
+
+  it('says which language the API refused', async () => {
+    const cli = await harness({}, [], own);
+    cli.api.delete.mockRejectedValueOnce(new CliError('Template not found.'));
+
+    await expect(cli.run('templates', 'delete', 'sms/order-shipped', '--env', 'main', '--yes')).rejects.toMatchObject({
+      message: 'order-shipped (en-US): Template not found.',
+    });
+  });
+
+  it('warns when the workspace would push the deleted language back', async () => {
+    const cli = await templateWorkspace(own);
+    await cli.run('templates', 'new', 'order-shipped', '--channel', 'sms');
+
+    await cli.run('templates', 'delete', 'order-shipped', '--env', 'main', '--language', 'en-US', '--yes');
+
+    expect(cli.stderr.join('')).toContain(
+      'nulvless/templates/sms/order-shipped/en-US.txt is still in the workspace; the next push sends it back.',
+    );
+  });
+});
+
 describe('functions pull', () => {
   const sources = {
     '/projects/shop/functions': { items: [{ slug: 'checkout' }, { slug: 'hello' }], total: 2 },
