@@ -9,7 +9,7 @@ import type { FetchText } from './examples';
 import { CancelledError, CliError, SessionExpiredError, TokenRejectedError } from './errors';
 import { createOutput, type Output } from './output';
 import { platformFrom, type Platform } from './platform';
-import { resolveOrganization, resolveScope } from './scope';
+import { offerToLink, resolveOrganization, resolveScope } from './scope';
 import { isInteractive, terminalPrompter, type Prompter } from './ui/prompter';
 import { supportsHyperlinks } from './ui/style';
 import { findWorkspace, readWorkspaceConfig } from './workspace';
@@ -107,8 +107,13 @@ export const createContext: ContextFactory = async (flags) => {
     elevate: confirmIdentity,
     organization: async () => resolveOrganization({ flags, env, linked: await workspaceLink(), api, prompter }),
     scope: async () => {
-      const scope = await resolveScope({ flags, env, linked: await workspaceLink(), api, prompter });
+      const root = await findWorkspace(cwd);
+      const sources = { flags, env, linked: root ? await readWorkspaceConfig(root) : {}, api, prompter };
+      const scope = await resolveScope(sources);
       output.step(`Project ${pc.bold(scope.project)} ${pc.dim(`in ${scope.organization}`)}`);
+      if (root && (await offerToLink(root, scope, sources))) {
+        output.success(`Linked the workspace to ${scope.project} in ${scope.organization}.`);
+      }
       return scope;
     },
     confirm: (message) => confirmAction(flags, prompter, message),

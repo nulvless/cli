@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { findWorkspace, initWorkspace, readWorkspaceConfig, writeFiles } from '../workspace';
+import { findWorkspace, initWorkspace, linkWorkspace, readWorkspaceConfig, writeFiles } from '../workspace';
 
 async function tempDir() {
   return mkdtemp(join(tmpdir(), 'nulvless-cli-'));
@@ -32,6 +32,48 @@ describe('initWorkspace', () => {
 
     await expect(initWorkspace(root, {})).rejects.toMatchObject({
       message: 'This folder already has a Nulvless workspace.',
+    });
+  });
+
+  it('refuses to create a workspace inside the folder of another one', async () => {
+    const root = await tempDir();
+    await initWorkspace(root, {});
+
+    await expect(initWorkspace(join(root, 'nulvless'), {})).rejects.toMatchObject({
+      message: `This folder is inside the Nulvless workspace of ${root}.`,
+      hint: `Run commands from ${root}, and link it to a project with \`nulvless link\`.`,
+    });
+    await expect(findWorkspace(join(root, 'nulvless'))).resolves.toBe(root);
+  });
+
+  it('creates a workspace for an app folder of a repository that has one', async () => {
+    const root = await tempDir();
+    await initWorkspace(root, {});
+    await mkdir(join(root, 'apps/web'), { recursive: true });
+
+    await initWorkspace(join(root, 'apps/web'), { project: 'web' });
+
+    await expect(readWorkspaceConfig(join(root, 'apps/web'))).resolves.toEqual({ project: 'web', functions: {} });
+  });
+});
+
+describe('linkWorkspace', () => {
+  it('writes the organization and project and keeps everything else', async () => {
+    const root = await tempDir();
+    await mkdir(join(root, 'nulvless'));
+    await writeFile(
+      join(root, 'nulvless/nulvless.jsonc'),
+      '{\n  // kept\n  "project": "old",\n  "functions": { "hello": { "secrets": ["KEY"] } },\n}\n',
+    );
+
+    await linkWorkspace(root, { organization: 'acme', project: 'shop' });
+
+    const text = await readFile(join(root, 'nulvless/nulvless.jsonc'), 'utf8');
+    expect(text).toContain('// kept');
+    await expect(readWorkspaceConfig(root)).resolves.toEqual({
+      organization: 'acme',
+      project: 'shop',
+      functions: { hello: { secrets: ['KEY'] } },
     });
   });
 });

@@ -1,6 +1,6 @@
 import { access, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
-import { parse, printParseErrorCode, type ParseError } from 'jsonc-parser';
+import { applyEdits, modify, parse, printParseErrorCode, type ParseError } from 'jsonc-parser';
 import { CliError } from './errors';
 import type { ExampleFile } from './examples';
 
@@ -60,6 +60,14 @@ export async function initWorkspace(root: string, link: WorkspaceLink) {
     throw new CliError('This folder already has a Nulvless workspace.', { hint: `Edit ${CONFIG_PATH} instead.` });
   }
 
+  const parent = await findWorkspace(root);
+  const fromParentFolder = parent ? relative(join(parent, WORKSPACE_DIR), resolve(root)) : '..';
+  if (!fromParentFolder.startsWith('..') && !isAbsolute(fromParentFolder)) {
+    throw new CliError(`This folder is inside the Nulvless workspace of ${parent}.`, {
+      hint: `Run commands from ${parent}, and link it to a project with \`nulvless link\`.`,
+    });
+  }
+
   await mkdir(join(root, WORKSPACE_DIR, FUNCTIONS_DIR), { recursive: true });
   await mkdir(join(root, WORKSPACE_DIR, TEMPLATES_DIR), { recursive: true });
   await writeFile(join(root, CONFIG_PATH), renderConfig(link));
@@ -80,6 +88,15 @@ export async function readWorkspaceConfig(root: string): Promise<WorkspaceConfig
   const workspace = { ...(config as WorkspaceConfig & { $schema?: string }) };
   delete workspace.$schema;
   return workspace as WorkspaceConfig;
+}
+
+export async function linkWorkspace(root: string, link: Required<WorkspaceLink>) {
+  const path = join(root, CONFIG_PATH);
+  let text = await readFile(path, 'utf8');
+  for (const [key, value] of Object.entries(link)) {
+    text = applyEdits(text, modify(text, [key], value, { formattingOptions: { insertSpaces: true, tabSize: 2 } }));
+  }
+  await writeFile(path, text);
 }
 
 export async function findWorkspace(from: string): Promise<string | null> {

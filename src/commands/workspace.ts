@@ -8,12 +8,15 @@ import { CliError, forItem } from '../errors';
 import { downloadExample, fetchCatalog, findExample, type ExampleKind } from '../examples';
 import { templatePath, workspaceTemplateOf, writeTemplate } from '../templates';
 import { ownTemplates } from './templates';
+import { resolveScope } from '../scope';
 import { examples } from '../ui/help';
 import {
   findWorkspace,
   FUNCTIONS_DIR,
   initWorkspace,
+  linkWorkspace,
   pathExists,
+  readWorkspaceConfig,
   WORKSPACE_DIR,
   writeFiles,
   type WorkspaceLink,
@@ -51,6 +54,35 @@ export function registerWorkspaceCommands(program: Command, context: ContextFact
       if (output.json) return output.data({ root: cwd, files });
       output.success('Created the Nulvless workspace in nulvless/.');
       output.note('Next: nulvless functions new hello');
+    });
+
+  program
+    .command('link')
+    .description('Link this workspace to a project, so commands run in it without --org and --project')
+    .addHelpText('after', examples(['nulvless link', 'nulvless link --org acme --project shop']))
+    .action(async (_options, command: Command) => {
+      const flags = command.optsWithGlobals<GlobalFlags>();
+      const { api, cwd, env, prompter, output, confirm } = await context(flags);
+
+      const root = await findWorkspace(cwd);
+      if (!root) throw new CliError('There is no Nulvless workspace here.', { hint: 'Run `nulvless init` first.' });
+
+      const linked = await readWorkspaceConfig(root);
+      const scope = await resolveScope({ flags, env, api, prompter });
+      const linkedTo = (link: WorkspaceLink) => `${link.project} in ${link.organization}`;
+
+      if (linked.organization === scope.organization && linked.project === scope.project) {
+        if (output.json) return output.data({ root, ...scope });
+        return output.info(`The workspace is already linked to ${linkedTo(scope)}.`);
+      }
+      if (linked.organization || linked.project) {
+        await confirm(`Link the workspace to ${linkedTo(scope)} instead of ${linkedTo(linked)}?`);
+      }
+
+      await linkWorkspace(root, scope);
+
+      if (output.json) return output.data({ root, ...scope });
+      output.success(`Linked the workspace to ${linkedTo(scope)}.`);
     });
 
   program

@@ -167,6 +167,62 @@ describe('init', () => {
   });
 });
 
+describe('link', () => {
+  const configOf = async (cwd: string) => JSON.parse(await readFile(join(cwd, 'nulvless/nulvless.jsonc'), 'utf8'));
+
+  it('links the workspace to a project', async () => {
+    const cli = await harness();
+    await cli.run('init');
+
+    await cli.run('link', '--org', 'acme', '--project', 'shop');
+
+    await expect(configOf(cli.cwd)).resolves.toMatchObject({ organization: 'acme', project: 'shop', functions: {} });
+    expect(cli.stderr.join('')).toContain('Linked the workspace to shop in acme.');
+  });
+
+  it('asks before replacing the project the workspace is linked to', async () => {
+    const cli = await harness();
+    await cli.run('init', '--org', 'acme', '--project', 'shop');
+
+    await expect(cli.run('link', '--org', 'acme', '--project', 'cart')).rejects.toMatchObject({
+      message: 'Link the workspace to cart in acme instead of shop in acme?',
+      hint: 'Pass --yes to confirm without a prompt.',
+    });
+    await expect(configOf(cli.cwd)).resolves.toMatchObject({ project: 'shop' });
+
+    await cli.run('link', '--org', 'acme', '--project', 'cart', '--yes');
+
+    await expect(configOf(cli.cwd)).resolves.toMatchObject({ project: 'cart' });
+  });
+
+  it('says so when the workspace is already linked to the project', async () => {
+    const cli = await harness();
+    await cli.run('init', '--org', 'acme', '--project', 'shop');
+
+    await cli.run('link', '--org', 'acme', '--project', 'shop');
+
+    expect(cli.stderr.join('')).toContain('The workspace is already linked to shop in acme.');
+  });
+
+  it('prints the link as JSON', async () => {
+    const cli = await harness();
+    await cli.run('init');
+
+    await cli.run('link', '--org', 'acme', '--project', 'shop', '--json');
+
+    expect(JSON.parse(cli.stdout.join(''))).toEqual({ root: cli.cwd, organization: 'acme', project: 'shop' });
+  });
+
+  it('needs a workspace', async () => {
+    const cli = await harness();
+
+    await expect(cli.run('link', '--org', 'acme', '--project', 'shop')).rejects.toMatchObject({
+      message: 'There is no Nulvless workspace here.',
+      hint: 'Run `nulvless init` first.',
+    });
+  });
+});
+
 describe('functions new', () => {
   it('needs a workspace', async () => {
     const cli = await harness();

@@ -1,7 +1,11 @@
+import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { Api } from '../api/http';
 import { MissingOptionError } from '../errors';
-import { resolveScope } from '../scope';
+import { offerToLink, resolveScope } from '../scope';
 import type { Prompter } from '../ui/prompter';
+import { initWorkspace, readWorkspaceConfig } from '../workspace';
 
 function fakeApi(routes: Record<string, unknown>): Api {
   const get = jest.fn(async (path: string) => routes[path]);
@@ -79,5 +83,63 @@ describe('resolveScope', () => {
     await expect(resolveScope({ flags: {}, env: {}, api, prompter: fakePrompter(false) })).rejects.toEqual(
       new MissingOptionError('organization', '--org <slug>', 'NULVLESS_ORG'),
     );
+  });
+});
+
+describe('offerToLink', () => {
+  const scope = { organization: 'acme', project: 'shop' };
+
+  async function workspace() {
+    const root = await mkdtemp(join(tmpdir(), 'nulvless-cli-'));
+    await initWorkspace(root, {});
+    return root;
+  }
+
+  function confirming(answer: boolean) {
+    const prompter = fakePrompter(true);
+    (prompter.confirm as jest.Mock).mockResolvedValue(answer);
+    return prompter;
+  }
+
+  it('links the workspace to the project chosen in the terminal when the user agrees', async () => {
+    const root = await workspace();
+    const prompter = confirming(true);
+
+    await expect(offerToLink(root, scope, { flags: {}, env: {}, linked: {}, api: fakeApi({}), prompter })).resolves.toBe(true);
+
+    expect(prompter.confirm).toHaveBeenCalledWith('Link this workspace to shop in acme?');
+    await expect(readWorkspaceConfig(root)).resolves.toMatchObject(scope);
+  });
+
+  it('leaves the workspace as it is when the user declines', async () => {
+    const root = await workspace();
+
+    await expect(
+      offerToLink(root, scope, { flags: {}, env: {}, linked: {}, api: fakeApi({}), prompter: confirming(false) }),
+    ).resolves.toBe(false);
+
+    await expect(readWorkspaceConfig(root)).resolves.toEqual({ functions: {} });
+  });
+
+  it.each([
+    ['flags', { flags: { org: 'acme', project: 'shop' }, env: {}, linked: {} }],
+    ['environment variables', { flags: {}, env: { NULVLESS_ORG: 'acme', NULVLESS_PROJECT: 'shop' }, linked: {} }],
+    ['the workspace link', { flags: {}, env: {}, linked: scope }],
+  ])('does not ask when %s name the project', async (_source, sources) => {
+    const prompter = confirming(true);
+
+    await expect(offerToLink(await workspace(), scope, { ...sources, api: fakeApi({}), prompter })).resolves.toBe(false);
+
+    expect(prompter.confirm).not.toHaveBeenCalled();
+  });
+
+  it('does not ask when it cannot prompt', async () => {
+    const prompter = fakePrompter(false);
+
+    await expect(offerToLink(await workspace(), scope, { flags: {}, env: {}, linked: {}, api: fakeApi({}), prompter })).resolves.toBe(
+      false,
+    );
+
+    expect(prompter.confirm).not.toHaveBeenCalled();
   });
 });

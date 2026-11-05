@@ -198,6 +198,7 @@ nulvless sudo                                   confirm it is you before protect
 nulvless doctor                                 check your setup and print each fix
 
 nulvless init                                   create a workspace (nulvless/) here
+nulvless link                                   link the workspace to a project
 nulvless create <dir> --example <name>          new project from an example app
 nulvless examples [--kind function|app|template]
 

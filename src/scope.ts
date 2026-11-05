@@ -3,14 +3,14 @@ import { resources, type Scope } from './api/resources';
 import { CliError, MissingOptionError } from './errors';
 import { consoleUrl } from './platform';
 import type { Prompter } from './ui/prompter';
-import type { WorkspaceLink } from './workspace';
+import { linkWorkspace, type WorkspaceLink } from './workspace';
 
 export interface ScopeFlags {
   org?: string;
   project?: string;
 }
 
-interface ScopeSources {
+export interface ScopeSources {
   flags: ScopeFlags;
   env: NodeJS.ProcessEnv;
   linked?: WorkspaceLink;
@@ -18,9 +18,19 @@ interface ScopeSources {
   prompter: Prompter;
 }
 
-export async function resolveOrganization({ flags, env, linked, api, prompter }: ScopeSources) {
-  const explicit = flags.org ?? env.NULVLESS_ORG ?? linked?.organization;
+function explicitOrganization({ flags, env, linked }: ScopeSources) {
+  return flags.org ?? env.NULVLESS_ORG ?? linked?.organization;
+}
+
+function explicitProject({ flags, env, linked }: ScopeSources) {
+  return flags.project ?? env.NULVLESS_PROJECT ?? linked?.project;
+}
+
+export async function resolveOrganization(sources: ScopeSources) {
+  const explicit = explicitOrganization(sources);
   if (explicit) return explicit;
+
+  const { api, prompter } = sources;
 
   const organizations = await resources.organizations(api);
   const [only] = organizations;
@@ -36,7 +46,7 @@ export async function resolveOrganization({ flags, env, linked, api, prompter }:
 
 export async function resolveScope(context: ScopeSources): Promise<Scope> {
   const organization = await resolveOrganization(context);
-  const explicit = context.flags.project ?? context.env.NULVLESS_PROJECT ?? context.linked?.project;
+  const explicit = explicitProject(context);
   if (explicit) return { organization, project: explicit };
 
   const projects = await resources.projects(context.api, organization);
@@ -50,4 +60,12 @@ export async function resolveScope(context: ScopeSources): Promise<Scope> {
     projects.map((entry) => ({ value: entry.slug, label: entry.name, hint: entry.slug })),
   );
   return { organization, project };
+}
+
+export async function offerToLink(root: string, scope: Scope, sources: ScopeSources) {
+  if ((explicitOrganization(sources) && explicitProject(sources)) || !sources.prompter.interactive) return false;
+  if (!(await sources.prompter.confirm(`Link this workspace to ${scope.project} in ${scope.organization}?`))) return false;
+
+  await linkWorkspace(root, scope);
+  return true;
 }
