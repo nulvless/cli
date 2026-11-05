@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { Option, type Command } from 'commander';
 import type { Api } from '../api/http';
-import { resources, type ListedTemplate, type PlatformTemplate, type Scope, type TemplateBody } from '../api/resources';
+import { resources, type Scope, type StoredTemplate, type TranslationBody } from '../api/resources';
 import type { ContextFactory } from '../context';
 import { CliError, forItem } from '../errors';
 import { downloadExample, fetchCatalog, findExample } from '../examples';
@@ -12,10 +12,11 @@ import {
   TEMPLATE_CHANNELS,
   templateFilesFor,
   templatePath,
-  workspaceTemplatesOf,
+  workspaceTemplateOf,
   TEMPLATES_PATH,
   writeTemplate,
   type TemplateChannel,
+  type TemplateVersion,
 } from '../templates';
 import { examples } from '../ui/help';
 import { assertFolderName, findWorkspace, pathExists, writeFiles } from '../workspace';
@@ -44,30 +45,37 @@ interface TemplateRow {
 
 const templateKey = (template: { channel: string; slug: string }) => `${template.channel}/${template.slug}`;
 
+const languagesOf = (template: StoredTemplate) => template.translations.map((translation) => translation.language);
+
 export async function ownTemplates(api: Api, target: Scope, environment: string, slugs: string[] = []) {
-  const listed = await resources.projectTemplates(api, target, environment);
+  const listed = await resources.storedTemplates(api, target, environment);
   const wanted = listed.filter((template) => !slugs.length || slugs.includes(template.slug));
-  return Promise.all(wanted.map((template) => resources.templateVersion(api, target, environment, template)));
+  return Promise.all(wanted.map((template) => resources.template(api, target, environment, template)));
 }
 
-function templateRows(platform: PlatformTemplate[], own: ListedTemplate[]): TemplateRow[] {
-  const languages = new Map<string, string[]>();
-  for (const entry of own) languages.set(templateKey(entry), [...(languages.get(templateKey(entry)) ?? []), entry.language]);
-
-  const platformKeys = new Set(platform.map(templateKey));
+function templateRows(platform: StoredTemplate[], stored: StoredTemplate[]): TemplateRow[] {
   const builtIn: TemplateRow[] = platform
-    .filter((template) => TEMPLATE_CHANNELS.includes(template.channel as TemplateChannel))
-    .map((template) => {
-      const customized = languages.get(templateKey(template)) ?? [];
-      return { slug: template.slug, channel: template.channel, kind: customized.length ? 'customized' : 'default', languages: customized };
-    });
-  const custom: TemplateRow[] = [...languages]
-    .filter(([key]) => !platformKeys.has(key))
-    .map(([key, customLanguages]) => {
-      const [channel, slug] = key.split('/') as [string, string];
-      return { slug, channel, kind: 'custom', languages: customLanguages };
-    });
+    .filter((template) => TEMPLATE_CHANNELS.includes(template.channel))
+    .map((template) => ({
+      slug: template.slug,
+      channel: template.channel,
+      kind: template.customized ? 'customized' : 'default',
+      languages: languagesOf(template),
+    }));
+  const custom: TemplateRow[] = stored
+    .filter((template) => !template.common)
+    .map((template) => ({ slug: template.slug, channel: template.channel, kind: 'custom', languages: languagesOf(template) }));
   return [...builtIn, ...custom];
+}
+
+function translationBody(version: TemplateVersion): TranslationBody {
+  return { ...(version.subject ? { subject: version.subject } : {}), content: version.content };
+}
+
+function fallbackOf(template: StoredTemplate, deleted: string[]) {
+  const remaining = template.translations.filter((translation) => !deleted.includes(translation.language));
+  const oldest = [...remaining].sort((one, other) => (one.created_at ?? '').localeCompare(other.created_at ?? ''))[0];
+  return remaining.find((translation) => translation.language === 'en-US') ?? oldest;
 }
 
 export function registerTemplateCommands(program: Command, context: ContextFactory, version: string) {
@@ -95,15 +103,15 @@ export function registerTemplateCommands(program: Command, context: ContextFacto
       const env = requireEnvironment(options.env);
       const target = await scope();
       const filters: Record<string, string> = options.channel ? { channel: options.channel } : {};
-      const [platform, own] = await output.task(`Loading templates of ${env}`, () =>
+      const [platform, stored] = await output.task(`Loading templates of ${env}`, () =>
         Promise.all([
           resources.platformTemplates(api, target, env, filters),
-          resources.projectTemplates(api, target, env, filters),
+          resources.storedTemplates(api, target, env, filters),
         ]),
       );
 
       output.table(
-        templateRows(platform.items, own),
+        templateRows(platform.items, stored),
         [
           { header: 'SLUG', value: (row) => row.slug },
           { header: 'CHANNEL', value: (row) => row.channel },
@@ -170,42 +178,51 @@ export function registerTemplateCommands(program: Command, context: ContextFacto
       }
 
       const [commons, stored] = await output.task(`Loading templates of ${env}`, () =>
-        Promise.all([resources.commonTemplates(api, target), resources.projectTemplates(api, target, env)]),
+        Promise.all([resources.commonTemplates(api, target), resources.storedTemplates(api, target, env)]),
       );
       const platformSlugs = new Set(
         Object.entries(commons).flatMap(([channel, entries]) => entries.map((entry) => `${channel}/${entry.key}`)),
       );
-      const existing = new Set(stored.map((entry) => `${entry.channel}/${entry.slug}/${entry.language}`));
+      const storedLanguages = new Map(stored.map((template) => [templateKey(template), languagesOf(template)]));
 
       const results = [];
       for (const template of local) {
-        const isPlatformTemplate = platformSlugs.has(`${template.channel}/${template.slug}`);
-        const naming = isPlatformTemplate
+        const details = platformSlugs.has(templateKey(template))
           ? {}
           : {
               ...(template.name ? { name: template.name } : {}),
               ...(template.description ? { description: template.description } : {}),
             };
+        const languages = storedLanguages.get(templateKey(template));
 
-        for (const templateVersion of template.versions) {
-          const key = { slug: template.slug, channel: template.channel, language: templateVersion.language };
-          const content: TemplateBody = {
-            ...(templateVersion.subject ? { subject: templateVersion.subject } : {}),
-            content: templateVersion.content,
-            ...naming,
-          };
-          const action = existing.has(`${key.channel}/${key.slug}/${key.language}`) ? 'updated' : 'created';
+        for (const [index, version] of template.versions.entries()) {
+          const label = `${template.slug} (${version.language})`;
+          const creating = !languages && index === 0;
 
           await forItem(
-            `${key.slug} (${key.language})`,
-            output.task(`Pushing ${key.slug} (${key.language})`, () =>
-              action === 'updated'
-                ? resources.updateTemplate(api, target, env, key, content)
-                : resources.createTemplate(api, target, env, { ...key, ...content }),
+            label,
+            output.task(`Pushing ${label}`, () =>
+              creating
+                ? resources.createTemplate(api, target, env, {
+                    slug: template.slug,
+                    channel: template.channel,
+                    ...details,
+                    language: version.language,
+                    ...translationBody(version),
+                  })
+                : resources.putTemplateTranslation(api, target, env, template, version.language, translationBody(version)),
             ),
           );
-          results.push({ ...key, action });
-          if (!output.json) output.success(`${action === 'created' ? 'Created' : 'Updated'} ${key.slug} (${key.language}) in ${env}.`);
+          const action = languages?.includes(version.language) ? 'updated' : 'created';
+          results.push({ slug: template.slug, channel: template.channel, language: version.language, action });
+          if (!output.json) output.success(`${action === 'created' ? 'Created' : 'Updated'} ${label} in ${env}.`);
+        }
+
+        if (languages && Object.keys(details).length) {
+          await forItem(
+            template.slug,
+            output.task(`Naming ${template.slug}`, () => resources.updateTemplateDetails(api, target, env, template, details)),
+          );
         }
       }
 
@@ -224,7 +241,7 @@ export function registerTemplateCommands(program: Command, context: ContextFacto
       const root = await requireWorkspace(cwd);
       const target = await scope();
       const stored = await output.task(`Loading templates of ${env}`, () => ownTemplates(api, target, env, slugs));
-      const pulled = workspaceTemplatesOf(stored);
+      const pulled = stored.map(workspaceTemplateOf);
       if (!pulled.length) {
         throw new CliError(`${env} has no templates of its own yet.`, {
           hint: 'Change one in the console, or create one with `nulvless templates new` and push it.',
@@ -258,56 +275,55 @@ export function registerTemplateCommands(program: Command, context: ContextFacto
 
       const env = requireEnvironment(options.env);
       const target = await scope();
-      const [listed, commons] = await output.task(`Loading templates of ${env}`, () =>
-        Promise.all([resources.projectTemplates(api, target, env), resources.commonTemplates(api, target)]),
-      );
+      const listed = await output.task(`Loading templates of ${env}`, () => resources.storedTemplates(api, target, env));
 
-      const matching = listed.filter(
-        (template) =>
-          (selector === template.slug || selector === templateKey(template)) &&
-          (!options.language || template.language === options.language),
-      );
+      const matching = listed.filter((template) => selector === template.slug || selector === templateKey(template));
       if (!matching.length) {
-        throw new CliError(`${env} has no template ${selector}${options.language ? ` in ${options.language}` : ''}.`, {
+        throw new CliError(`${env} has no template ${selector}.`, {
           hint: `Run \`nulvless templates list --env ${env}\` to see them.`,
         });
       }
-      const channels = [...new Set(matching.map((template) => template.channel))];
+      const channels = matching.map((template) => template.channel);
       if (channels.length > 1) {
         throw new CliError(`${selector} is in ${channels.join(' and ')}.`, {
           hint: `Pass ${channels.map((channel) => `${channel}/${selector}`).join(' or ')}.`,
         });
       }
 
-      const key = templateKey(matching[0]!);
-      const languages = matching.map((template) => template.language);
-      const platformDefault = (commons[matching[0]!.channel] ?? []).some((entry) => entry.key === matching[0]!.slug);
-      const fallbackStays = listed.some(
-        (template) => templateKey(template) === key && template.language === 'en-US' && !languages.includes('en-US'),
-      );
-      const consequence = platformDefault
-        ? 'Nulvless goes back to sending its default.'
-        : fallbackStays
-          ? `Messages in ${languages.join(', ')} fall back to en-US.`
+      const template = matching[0]!;
+      const key = templateKey(template);
+      const storedLanguages = languagesOf(template);
+      const languages: string[] = options.language ? [options.language] : storedLanguages;
+      if (options.language && !storedLanguages.some((language) => language === options.language)) {
+        throw new CliError(`${env} has no template ${selector} in ${options.language}.`, {
+          hint: `Run \`nulvless templates list --env ${env}\` to see them.`,
+        });
+      }
+
+      const fallback = fallbackOf(template, languages);
+      const consequence = fallback
+        ? `Messages in ${languages.join(', ')} fall back to ${fallback.language}.`
+        : template.common
+          ? 'Nulvless goes back to sending its default.'
           : 'Messages sent with it stop working.';
       await confirm(`Delete ${key} (${languages.join(', ')}) from ${env}? ${consequence}`);
 
-      for (const template of matching) {
-        await forItem(
-          `${template.slug} (${template.language})`,
-          output.task(`Deleting ${template.slug} (${template.language})`, () =>
-            resources.deleteTemplate(api, target, env, template),
-          ),
-        );
-      }
+      await forItem(
+        fallback ? `${template.slug} (${languages[0]})` : template.slug,
+        output.task(`Deleting ${key} (${languages.join(', ')})`, () =>
+          fallback
+            ? resources.deleteTemplateTranslation(api, target, env, template, languages[0]!)
+            : resources.deleteTemplate(api, target, env, template),
+        ),
+      );
 
-      if (output.json) return output.data(matching);
+      if (output.json) return output.data({ slug: template.slug, channel: template.channel, languages });
       output.success(`Deleted ${key} (${languages.join(', ')}) from ${env}.`);
 
       const root = await findWorkspace(cwd);
       if (!root) return;
-      for (const template of matching) {
-        const file = `${templatePath(template.channel, template.slug)}/${languageFile(template.channel, template.language)}`;
+      for (const language of languages) {
+        const file = `${templatePath(template.channel, template.slug)}/${languageFile(template.channel, language)}`;
         if (await pathExists(join(root, file))) output.note(`${file} is still in the workspace; the next push sends it back.`);
       }
     });

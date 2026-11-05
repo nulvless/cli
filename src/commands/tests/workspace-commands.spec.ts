@@ -68,14 +68,28 @@ const COMMONS = {
   sms: [{ key: 'phone-otp-verification', name: 'Code', description: '', keys: [] }],
 };
 
-function listedTemplate({ subject: _subject, content: _content, common: _common, ...summary }: Record<string, unknown>) {
-  return summary;
+interface StoredTemplateFixture {
+  slug: string;
+  channel: string;
+  common: boolean;
+  customized?: boolean;
+  name?: string;
+  description?: string;
+  translations: { language: string; subject?: string | null; content: string; created_at?: string }[];
+}
+
+function listedTemplate(template: StoredTemplateFixture) {
+  return {
+    customized: true,
+    ...template,
+    translations: template.translations.map(({ content: _content, ...translation }) => translation),
+  };
 }
 
 async function harness(
   flags: Partial<GlobalFlags> = {},
   deployed: string[] = [],
-  projectTemplates: Record<string, unknown>[] = [],
+  projectTemplates: StoredTemplateFixture[] = [],
   routes: Record<string, unknown> = {},
 ) {
   const cwd = await mkdtemp(join(tmpdir(), 'nulvless-cli-'));
@@ -91,12 +105,8 @@ async function harness(
       if (path in routes) return routes[path];
       if (path === '/projects/templates/commons') return COMMONS;
       if (path.endsWith('/templates')) return { items: projectTemplates.map(listedTemplate), total: projectTemplates.length };
-      const version = path.match(/\/templates\/(email|sms)\/([^/]+)\/([^/]+)$/);
-      if (version) {
-        return projectTemplates.find(
-          (template) => template.channel === version[1] && template.slug === version[2] && template.language === version[3],
-        );
-      }
+      const stored = path.match(/\/templates\/(email|sms)\/([^/]+)$/);
+      if (stored) return projectTemplates.find((template) => template.channel === stored[1] && template.slug === stored[2]);
       return { items: deployed.map((slug) => ({ slug })), total: deployed.length };
     }),
     post: jest.fn(async () => ({ slug: 'created', short_version: 'v1' })),
@@ -406,7 +416,7 @@ describe('functions deploy', () => {
   });
 });
 
-async function templateWorkspace(projectTemplates: Record<string, unknown>[] = [], flags: Partial<GlobalFlags> = {}) {
+async function templateWorkspace(projectTemplates: StoredTemplateFixture[] = [], flags: Partial<GlobalFlags> = {}) {
   const cli = await harness(flags, [], projectTemplates);
   await cli.run('init');
   return cli;
@@ -447,7 +457,7 @@ describe('templates new', () => {
 });
 
 describe('templates push', () => {
-  async function withTemplates(projectTemplates: Record<string, unknown>[] = [], flags: Partial<GlobalFlags> = {}) {
+  async function withTemplates(projectTemplates: StoredTemplateFixture[] = [], flags: Partial<GlobalFlags> = {}) {
     const cli = await templateWorkspace(projectTemplates, flags);
     await cli.run('templates', 'new', 'welcome-user', '--template', 'welcome-user');
     await cli.run('templates', 'new', 'order-shipped', '--channel', 'sms');
@@ -463,12 +473,14 @@ describe('templates push', () => {
     });
   });
 
-  it('creates the templates the environment does not have and updates the others', async () => {
-    const cli = await withTemplates([{ slug: 'welcome-user', channel: 'email', language: 'en-US' }]);
+  it('creates the templates the environment does not have and puts the languages of the others', async () => {
+    const cli = await withTemplates([
+      { slug: 'welcome-user', channel: 'email', common: true, translations: [{ language: 'en-US', subject: 'Hi', content: '<p>Hi</p>' }] },
+    ]);
 
     await cli.run('templates', 'push', '--env', 'staging');
 
-    expect(cli.api.patch).toHaveBeenCalledWith('/projects/shop/staging/templates/email/welcome-user/en-US', {
+    expect(cli.api.put).toHaveBeenCalledWith('/projects/shop/staging/templates/email/welcome-user/en-US', {
       organization: 'acme',
       body: { subject: 'Welcome to {{platform.name}}', content: '<p>Welcome to {{platform.name}}</p>' },
     });
@@ -478,8 +490,31 @@ describe('templates push', () => {
     });
     expect(cli.api.get).toHaveBeenCalledWith('/projects/shop/staging/templates', {
       organization: 'acme',
-      query: { source: 'project', page: 1, page_size: 100 },
+      query: { page: 1, page_size: 100 },
     });
+  });
+
+  it('adds a new language to a template the environment has, then renames it', async () => {
+    const cli = await withTemplates([
+      { slug: 'order-shipped', channel: 'sms', common: false, translations: [{ language: 'en-US', content: 'Old' }] },
+    ]);
+    await writeFile(join(cli.cwd, 'nulvless/templates/sms/order-shipped/pt-BR.txt'), 'Enviado');
+
+    await cli.run('templates', 'push', 'order-shipped', '--env', 'staging', '--json');
+
+    expect(cli.api.post).not.toHaveBeenCalled();
+    expect(cli.api.put).toHaveBeenCalledWith('/projects/shop/staging/templates/sms/order-shipped/pt-BR', {
+      organization: 'acme',
+      body: { content: 'Enviado' },
+    });
+    expect(cli.api.patch).toHaveBeenCalledWith('/projects/shop/staging/templates/sms/order-shipped', {
+      organization: 'acme',
+      body: { name: 'order-shipped' },
+    });
+    expect(JSON.parse(cli.stdout.join(''))).toEqual([
+      { slug: 'order-shipped', channel: 'sms', language: 'en-US', action: 'updated' },
+      { slug: 'order-shipped', channel: 'sms', language: 'pt-BR', action: 'created' },
+    ]);
   });
 
   it('says which template the API refused, with its own message and hint', async () => {
@@ -505,6 +540,7 @@ describe('templates push', () => {
       organization: 'acme',
       body: { slug: 'welcome-user', channel: 'email', language: 'en-US', subject: 'Hi', content: '<p>Welcome to {{platform.name}}</p>' },
     });
+    expect(cli.api.patch).not.toHaveBeenCalled();
   });
 
   it('asks before changing production', async () => {
@@ -528,10 +564,25 @@ describe('templates push', () => {
 });
 
 describe('templates pull', () => {
-  const stored = [
-    { slug: 'welcome-user', channel: 'email', language: 'en-US', subject: 'Hello', content: '<p>Hello</p>', common: true },
-    { slug: 'welcome-user', channel: 'email', language: 'pt-BR', subject: 'Olá', content: '<p>Olá</p>', common: true },
-    { slug: 'order-shipped', channel: 'sms', language: 'en-US', subject: null, content: 'Shipped', name: 'Order shipped', description: 'Sent on dispatch', common: false },
+  const stored: StoredTemplateFixture[] = [
+    {
+      slug: 'welcome-user',
+      channel: 'email',
+      name: 'Welcome user',
+      common: true,
+      translations: [
+        { language: 'en-US', subject: 'Hello', content: '<p>Hello</p>' },
+        { language: 'pt-BR', subject: 'Olá', content: '<p>Olá</p>' },
+      ],
+    },
+    {
+      slug: 'order-shipped',
+      channel: 'sms',
+      name: 'Order shipped',
+      description: 'Sent on dispatch',
+      common: false,
+      translations: [{ language: 'en-US', subject: null, content: 'Shipped' }],
+    },
   ];
 
   it('writes the project templates of an environment into the workspace', async () => {
@@ -573,19 +624,30 @@ describe('templates pull', () => {
 
 describe('templates list', () => {
   const platform = [
-    { slug: 'welcome-user', channel: 'email', name: 'Welcome', description: '', keys: [] },
-    { slug: 'phone-otp-verification', channel: 'sms', name: 'Code', description: '', keys: [] },
+    {
+      slug: 'welcome-user',
+      channel: 'email',
+      common: true,
+      customized: true,
+      translations: [{ language: 'pt-BR' }],
+    },
+    { slug: 'phone-otp-verification', channel: 'sms', common: true, customized: false, translations: [] },
   ];
-  const own = [
-    { slug: 'welcome-user', channel: 'email', language: 'pt-BR' },
-    { slug: 'order-shipped', channel: 'sms', language: 'en-US' },
-    { slug: 'order-shipped', channel: 'sms', language: 'pt-BR' },
+  const stored = [
+    platform[0],
+    {
+      slug: 'order-shipped',
+      channel: 'sms',
+      common: false,
+      customized: true,
+      translations: [{ language: 'en-US' }, { language: 'pt-BR' }],
+    },
   ];
 
   async function listing() {
     const cli = await harness();
     cli.api.get.mockImplementation(async (_path: string, request?: { query?: { source?: string } }) =>
-      request?.query?.source === 'platform' ? { items: platform, total: platform.length } : { items: own, total: own.length },
+      request?.query?.source === 'platform' ? { items: platform, total: platform.length } : { items: stored, total: stored.length },
     );
     return cli;
   }
@@ -599,6 +661,7 @@ describe('templates list', () => {
     expect(lines.find((line) => line.includes('welcome-user'))).toMatch(/email\s+customized\s+pt-BR/);
     expect(lines.find((line) => line.includes('phone-otp-verification'))).toMatch(/sms\s+default/);
     expect(lines.find((line) => line.includes('order-shipped'))).toMatch(/sms\s+custom\s+en-US, pt-BR/);
+    expect(lines.filter((line) => line.includes('welcome-user'))).toHaveLength(1);
   });
 
   it('asks the API for one channel', async () => {
@@ -632,8 +695,13 @@ describe('pull', () => {
     '/projects/shop/functions/checkout/source': { files: [{ path: 'index.ts', content: 'checkout' }] },
     '/projects/shop/functions/hello/source': { files: [{ path: 'index.ts', content: 'hello' }] },
   };
-  const stored = [
-    { slug: 'welcome-user', channel: 'email', language: 'en-US', subject: 'Hello', content: '<p>Hello</p>', common: true },
+  const stored: StoredTemplateFixture[] = [
+    {
+      slug: 'welcome-user',
+      channel: 'email',
+      common: true,
+      translations: [{ language: 'en-US', subject: 'Hello', content: '<p>Hello</p>' }],
+    },
   ];
 
   async function workspace(templates = stored, routes: Record<string, unknown> = sources) {
@@ -659,7 +727,7 @@ describe('pull', () => {
 
     expect(cli.api.get).toHaveBeenCalledWith('/projects/shop/staging/templates', {
       organization: 'acme',
-      query: { source: 'project', page: 1, page_size: 100 },
+      query: { page: 1, page_size: 100 },
     });
     expect(cli.stderr.join('')).toContain('from staging.');
   });
@@ -704,21 +772,33 @@ describe('pull', () => {
 });
 
 describe('templates delete', () => {
-  const own = [
-    { slug: 'order-shipped', channel: 'sms', language: 'en-US', content: 'Shipped' },
-    { slug: 'order-shipped', channel: 'sms', language: 'pt-BR', content: 'Enviado' },
-    { slug: 'welcome-user', channel: 'email', language: 'en-US', subject: 'Hello', content: '<p>Hi</p>' },
-    { slug: 'code', channel: 'email', language: 'en-US', subject: 'Code', content: 'a' },
-    { slug: 'code', channel: 'sms', language: 'en-US', content: 'b' },
+  const own: StoredTemplateFixture[] = [
+    {
+      slug: 'order-shipped',
+      channel: 'sms',
+      common: false,
+      translations: [
+        { language: 'en-US', content: 'Shipped', created_at: '2026-11-01T00:00:00.000Z' },
+        { language: 'pt-BR', content: 'Enviado', created_at: '2026-11-02T00:00:00.000Z' },
+      ],
+    },
+    {
+      slug: 'welcome-user',
+      channel: 'email',
+      common: true,
+      translations: [{ language: 'en-US', subject: 'Hello', content: '<p>Hi</p>' }],
+    },
+    { slug: 'code', channel: 'email', common: false, translations: [{ language: 'en-US', subject: 'Code', content: 'a' }] },
+    { slug: 'code', channel: 'sms', common: false, translations: [{ language: 'en-US', content: 'b' }] },
   ];
 
-  it('deletes every language of a template after confirming', async () => {
+  it('deletes the whole template after confirming', async () => {
     const cli = await harness({}, [], own);
 
     await cli.run('templates', 'delete', 'order-shipped', '--env', 'staging', '--yes');
 
-    expect(cli.api.delete).toHaveBeenCalledWith('/projects/shop/staging/templates/sms/order-shipped/en-US', { organization: 'acme' });
-    expect(cli.api.delete).toHaveBeenCalledWith('/projects/shop/staging/templates/sms/order-shipped/pt-BR', { organization: 'acme' });
+    expect(cli.api.delete).toHaveBeenCalledTimes(1);
+    expect(cli.api.delete).toHaveBeenCalledWith('/projects/shop/staging/templates/sms/order-shipped', { organization: 'acme' });
     expect(cli.stderr.join('')).toContain('Deleted sms/order-shipped (en-US, pt-BR) from staging.');
   });
 
@@ -736,6 +816,14 @@ describe('templates delete', () => {
 
     await expect(cli.run('templates', 'delete', 'order-shipped', '--env', 'main', '--language', 'pt-BR')).rejects.toMatchObject({
       message: 'Delete sms/order-shipped (pt-BR) from main? Messages in pt-BR fall back to en-US.',
+    });
+  });
+
+  it('says the deleted language falls back to the oldest one left when en-US goes', async () => {
+    const cli = await harness({}, [], own);
+
+    await expect(cli.run('templates', 'delete', 'order-shipped', '--env', 'main', '--language', 'en-US')).rejects.toMatchObject({
+      message: 'Delete sms/order-shipped (en-US) from main? Messages in en-US fall back to pt-BR.',
     });
   });
 
@@ -774,12 +862,20 @@ describe('templates delete', () => {
     });
   });
 
-  it('says which language the API refused', async () => {
+  it('says so when the template has no such language', async () => {
+    const cli = await harness({}, [], own);
+
+    await expect(
+      cli.run('templates', 'delete', 'welcome-user', '--env', 'main', '--language', 'pt-BR', '--yes'),
+    ).rejects.toMatchObject({ message: 'main has no template welcome-user in pt-BR.' });
+  });
+
+  it('says which template the API refused', async () => {
     const cli = await harness({}, [], own);
     cli.api.delete.mockRejectedValueOnce(new CliError('Template not found.'));
 
     await expect(cli.run('templates', 'delete', 'sms/order-shipped', '--env', 'main', '--yes')).rejects.toMatchObject({
-      message: 'order-shipped (en-US): Template not found.',
+      message: 'order-shipped: Template not found.',
     });
   });
 

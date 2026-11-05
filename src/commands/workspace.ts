@@ -6,7 +6,7 @@ import type { ContextFactory, GlobalFlags } from '../context';
 import { environmentOption } from '../environment-option';
 import { CliError, forItem } from '../errors';
 import { downloadExample, fetchCatalog, findExample, type ExampleKind } from '../examples';
-import { templatePath, workspaceTemplatesOf, writeTemplate } from '../templates';
+import { templatePath, workspaceTemplateOf, writeTemplate } from '../templates';
 import { ownTemplates } from './templates';
 import { examples } from '../ui/help';
 import {
@@ -69,7 +69,7 @@ export function registerWorkspaceCommands(program: Command, context: ContextFact
         Promise.all([resources.functions(api, target), ownTemplates(api, target, options.env)]),
       );
       const functionPaths = functions.map((fn) => ({ slug: fn.slug, path: `${WORKSPACE_DIR}/${FUNCTIONS_DIR}/${fn.slug}` }));
-      const templates = workspaceTemplatesOf(stored).map((template) => ({
+      const templates = stored.map(workspaceTemplateOf).map((template) => ({
         template,
         path: templatePath(template.channel, template.slug),
       }));

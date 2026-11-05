@@ -218,33 +218,40 @@ export interface Secret {
   updated_at: string | null;
 }
 
+export interface TemplateTranslation {
+  language: 'en-US' | 'pt-BR';
+  subject?: string | null;
+  content?: string;
+  created_at?: string;
+}
+
 export interface StoredTemplate {
   slug: string;
   channel: 'email' | 'sms';
-  language: 'en-US' | 'pt-BR';
-  subject?: string | null;
-  content: string;
   name?: string | null;
   description?: string | null;
-  common?: boolean;
+  common: boolean;
+  customized: boolean;
+  translations: TemplateTranslation[];
 }
 
-export interface PlatformTemplate {
+export interface TemplateKey {
   slug: string;
   channel: string;
-  name: string;
 }
 
-export type ListedTemplate = Pick<StoredTemplate, 'slug' | 'channel' | 'language'>;
-
-export interface TemplateBody {
-  slug?: string;
-  channel?: string;
-  language?: string;
+export interface TranslationBody {
   subject?: string;
   content: string;
+}
+
+export interface TemplateDetails {
   name?: string;
   description?: string;
+}
+
+export interface NewTemplate extends TemplateKey, TemplateDetails, TranslationBody {
+  language: string;
 }
 
 type CommonTemplates = Record<string, { key: string }[]>;
@@ -288,6 +295,9 @@ const environmentPath = (scope: Scope, environment: string) =>
 const templatesPath = (scope: Scope, environment: string) =>
   `/projects/${encodeURIComponent(scope.project)}/${encodeURIComponent(environment)}/templates`;
 
+const templatePath = (scope: Scope, environment: string, template: TemplateKey) =>
+  `${templatesPath(scope, environment)}/${template.channel}/${encodeURIComponent(template.slug)}`;
+
 const functionPath = (scope: Scope, fn: string) =>
   `/projects/${encodeURIComponent(scope.project)}/functions/${encodeURIComponent(fn)}`;
 
@@ -316,41 +326,44 @@ export const resources = {
   commonTemplates: (api: Api, scope: Scope) =>
     api.get<CommonTemplates>('/projects/templates/commons', { organization: scope.organization }),
 
-  projectTemplates: (api: Api, scope: Scope, environment: string, filters: Record<string, string> = {}) =>
-    allPages<ListedTemplate>(api, templatesPath(scope, environment), scope.organization, { source: 'project', ...filters }),
-
-  templateVersion: (api: Api, scope: Scope, environment: string, template: ListedTemplate) =>
-    api.get<StoredTemplate>(
-      `${templatesPath(scope, environment)}/${template.channel}/${encodeURIComponent(template.slug)}/${template.language}`,
-      { organization: scope.organization },
-    ),
-
-  deleteTemplate: (api: Api, scope: Scope, environment: string, template: ListedTemplate) =>
-    api.delete(
-      `${templatesPath(scope, environment)}/${template.channel}/${encodeURIComponent(template.slug)}/${template.language}`,
-      { organization: scope.organization },
-    ),
+  storedTemplates: (api: Api, scope: Scope, environment: string, filters: Record<string, string> = {}) =>
+    allPages<StoredTemplate>(api, templatesPath(scope, environment), scope.organization, filters),
 
   platformTemplates: (api: Api, scope: Scope, environment: string, filters: Record<string, string>) =>
-    api.get<Page<PlatformTemplate>>(templatesPath(scope, environment), {
+    api.get<Page<StoredTemplate>>(templatesPath(scope, environment), {
       organization: scope.organization,
       query: { source: 'platform', ...filters },
     }),
 
-  createTemplate: (api: Api, scope: Scope, environment: string, body: TemplateBody) =>
+  template: (api: Api, scope: Scope, environment: string, template: TemplateKey) =>
+    api.get<StoredTemplate>(templatePath(scope, environment, template), { organization: scope.organization }),
+
+  createTemplate: (api: Api, scope: Scope, environment: string, body: NewTemplate) =>
     api.post<StoredTemplate>(templatesPath(scope, environment), { organization: scope.organization, body }),
 
-  updateTemplate: (
+  updateTemplateDetails: (api: Api, scope: Scope, environment: string, template: TemplateKey, body: TemplateDetails) =>
+    api.patch<StoredTemplate>(templatePath(scope, environment, template), { organization: scope.organization, body }),
+
+  putTemplateTranslation: (
     api: Api,
     scope: Scope,
     environment: string,
-    template: { slug: string; channel: string; language: string },
-    body: TemplateBody,
+    template: TemplateKey,
+    language: string,
+    body: TranslationBody,
   ) =>
-    api.patch<StoredTemplate>(
-      `${templatesPath(scope, environment)}/${template.channel}/${encodeURIComponent(template.slug)}/${template.language}`,
-      { organization: scope.organization, body },
-    ),
+    api.put<StoredTemplate>(`${templatePath(scope, environment, template)}/${language}`, {
+      organization: scope.organization,
+      body,
+    }),
+
+  deleteTemplate: (api: Api, scope: Scope, environment: string, template: TemplateKey) =>
+    api.delete<StoredTemplate>(templatePath(scope, environment, template), { organization: scope.organization }),
+
+  deleteTemplateTranslation: (api: Api, scope: Scope, environment: string, template: TemplateKey, language: string) =>
+    api.delete<StoredTemplate>(`${templatePath(scope, environment, template)}/${language}`, {
+      organization: scope.organization,
+    }),
 
   functionSource: (api: Api, scope: Scope, fn: string) =>
     api.get<{ files: { path: string; content: string }[] }>(`${functionPath(scope, fn)}/source`, {

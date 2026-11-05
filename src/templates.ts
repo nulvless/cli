@@ -42,26 +42,18 @@ interface TemplateLocation {
   slug: string;
 }
 
-export function workspaceTemplatesOf(stored: StoredTemplate[]): WorkspaceTemplate[] {
-  const templates = new Map<string, WorkspaceTemplate>();
-
-  for (const entry of stored) {
-    const template = templates.get(entry.slug) ?? {
-      slug: entry.slug,
-      channel: entry.channel,
-      ...(!entry.common && entry.name ? { name: entry.name } : {}),
-      ...(!entry.common && entry.description ? { description: entry.description } : {}),
-      versions: [],
-    };
-    template.versions.push({
-      language: entry.language,
-      ...(entry.subject ? { subject: entry.subject } : {}),
-      content: entry.content,
-    });
-    templates.set(entry.slug, template);
-  }
-
-  return [...templates.values()];
+export function workspaceTemplateOf(stored: StoredTemplate): WorkspaceTemplate {
+  return {
+    slug: stored.slug,
+    channel: stored.channel,
+    ...(!stored.common && stored.name ? { name: stored.name } : {}),
+    ...(!stored.common && stored.description ? { description: stored.description } : {}),
+    versions: stored.translations.map((translation) => ({
+      language: translation.language,
+      ...(translation.subject ? { subject: translation.subject } : {}),
+      content: translation.content ?? '',
+    })),
+  };
 }
 
 export function languageFile(channel: TemplateChannel, language: string) {
