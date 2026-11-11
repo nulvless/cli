@@ -14,6 +14,7 @@ import { registerProjectCommands } from './commands/projects';
 import { registerSecretCommands } from './commands/secrets';
 import { registerStatusCommands } from './commands/status';
 import { registerTemplateCommands } from './commands/templates';
+import { registerUpgradeCommand } from './commands/upgrade';
 import { registerUserCommands } from './commands/users';
 import { registerWorkspaceCommands } from './commands/workspace';
 import type { ContextFactory } from './context';
@@ -74,6 +75,7 @@ export function buildProgram(context: ContextFactory, version: string) {
   registerFeedbackCommand(program, context, version);
   registerDocsCommand(program, context);
   registerDoctorCommand(program, context, version);
+  registerUpgradeCommand(program, context, version);
 
   return program;
 }

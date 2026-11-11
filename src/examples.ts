@@ -28,7 +28,7 @@ export interface ExampleFile {
 export type FetchText = (url: string) => Promise<Response>;
 
 const CATALOG_VERSION = 1;
-const UPDATE_HINT = 'Update with `npm install --global @nulvless/cli@latest`.';
+const UPDATE_HINT = 'Update with `nulvless upgrade`.';
 
 const EXAMPLES_REPOSITORY_URL = 'https://github.com/nulvless/examples/tree/main';
 

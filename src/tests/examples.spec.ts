@@ -39,7 +39,7 @@ describe('fetchCatalog', () => {
 
     await expect(fetchCatalog(EXAMPLES_URL, fetchImpl)).rejects.toMatchObject({
       message: 'This version of the CLI cannot read the examples catalog.',
-      hint: 'Update with `npm install --global @nulvless/cli@latest`.',
+      hint: 'Update with `nulvless upgrade`.',
     });
   });
 
@@ -106,7 +106,7 @@ describe('findExample', () => {
     expect(() => findExample([example({ minCliVersion: '0.10.0' })], 'verify-session', 'function', '0.9.3')).toThrow(
       expect.objectContaining({
         message: 'verify-session needs Nulvless CLI 0.10.0 or later. You have 0.9.3.',
-        hint: 'Update with `npm install --global @nulvless/cli@latest`.',
+        hint: 'Update with `nulvless upgrade`.',
       }),
     );
   });

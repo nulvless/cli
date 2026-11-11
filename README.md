@@ -196,6 +196,7 @@ option.
 nulvless login | logout | whoami                sign in, sign out, show the account
 nulvless sudo                                   confirm it is you before protected actions
 nulvless doctor                                 check your setup and print each fix
+nulvless upgrade                                update the CLI to its latest version
 
 nulvless init                                   create a workspace (nulvless/) here
 nulvless link                                   link the workspace to a project
@@ -284,6 +285,10 @@ that fixes each problem. With `--json` an agent can read the same report.
 
 Once a day the CLI checks npm for a newer version and, in a terminal, mentions
 it after the command finishes. The check is skipped in CI and with `--json`.
+
+`nulvless upgrade` installs the latest version with the package manager that
+installed the CLI: `npm`, `pnpm`, `yarn` or `bun`. A run through `npx` or a CLI
+installed as a project dependency is left to you, with the command to use.
 
 ## Output and exit codes
 

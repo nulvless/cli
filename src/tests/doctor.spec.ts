@@ -44,7 +44,7 @@ describe('runChecks', () => {
 
     expect(checks).toEqual([
       { name: 'Node.js', status: 'fail', detail: '18.19.0', fix: 'Install Node.js 20 or later.' },
-      { name: 'CLI version', status: 'warn', detail: '0.3.0, 0.4.0 is available', fix: 'npm install --global @nulvless/cli@latest' },
+      { name: 'CLI version', status: 'warn', detail: '0.3.0, 0.4.0 is available', fix: 'nulvless upgrade' },
       { name: 'Nulvless API', status: 'fail', detail: 'not reachable', fix: 'Check your connection, proxy or NULVLESS_API_URL.' },
       { name: 'Sign-in', status: 'fail', detail: 'You are not signed in.', fix: 'nulvless login' },
       { name: 'Workspace', status: 'warn', detail: 'none in this folder', fix: 'nulvless init' },

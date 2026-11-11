@@ -45,7 +45,7 @@ describe('latestVersion', () => {
 describe('newerVersionNotice', () => {
   it('says how to update when a newer version exists', () => {
     expect(newerVersionNotice('0.2.0', '0.3.1')).toBe(
-      'Nulvless CLI 0.3.1 is available (you have 0.2.0). Update with `npm install --global @nulvless/cli@latest`.',
+      'Nulvless CLI 0.3.1 is available (you have 0.2.0). Update with `nulvless upgrade`.',
     );
   });
 

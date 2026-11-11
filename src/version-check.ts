@@ -24,12 +24,14 @@ export async function latestVersion({
   cache,
   fetchImpl = fetch,
   now = Date.now(),
+  fresh = false,
 }: {
   cache: string;
   fetchImpl?: FetchJson;
   now?: number;
+  fresh?: boolean;
 }): Promise<string | null> {
-  const cached = await readCache(cache);
+  const cached = fresh ? null : await readCache(cache);
   if (cached && now - cached.checkedAt < CACHE_TTL_MS) return cached.latest;
 
   try {
@@ -46,5 +48,5 @@ export async function latestVersion({
 
 export function newerVersionNotice(current: string, latest: string | null) {
   if (!latest || !isOlderVersion(current, latest)) return null;
-  return `Nulvless CLI ${latest} is available (you have ${current}). Update with \`npm install --global @nulvless/cli@latest\`.`;
+  return `Nulvless CLI ${latest} is available (you have ${current}). Update with \`nulvless upgrade\`.`;
 }

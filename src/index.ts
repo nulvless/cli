@@ -12,7 +12,8 @@ process.on('SIGINT', () => {
   process.exit(ExitCode.Interrupted);
 });
 
-const wantsVersionNotice = Boolean(process.stderr.isTTY) && !process.env.CI && !process.argv.includes('--json');
+const wantsVersionNotice =
+  Boolean(process.stderr.isTTY) && !process.env.CI && !process.argv.includes('--json') && !process.argv.includes('upgrade');
 
 async function showVersionNotice() {
   const notice = newerVersionNotice(version, await latestVersion({ cache: versionCacheFile(process.env) }));

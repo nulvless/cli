@@ -63,7 +63,7 @@ export async function runChecks(probes: DoctorProbes): Promise<Check[]> {
           name: 'CLI version',
           status: 'warn',
           detail: `${probes.cliVersion}, ${latest} is available`,
-          fix: 'npm install --global @nulvless/cli@latest',
+          fix: 'nulvless upgrade',
         }
       : { name: 'CLI version', status: 'ok', detail: probes.cliVersion },
   );
