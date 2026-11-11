@@ -50,6 +50,21 @@ describe('readTemplates', () => {
     ]);
   });
 
+  it('leaves the languages to the API, so any language file is pushed', async () => {
+    const root = await workspaceWith({ 'sms/hello-sms/es-AR.txt': 'Hola', 'sms/hello-sms/ko-KR.txt': '안녕' });
+
+    await expect(readTemplates(root)).resolves.toEqual([
+      {
+        slug: 'hello-sms',
+        channel: 'sms',
+        versions: [
+          { language: 'es-AR', content: 'Hola' },
+          { language: 'ko-KR', content: '안녕' },
+        ],
+      },
+    ]);
+  });
+
   it('selects templates by slug in every channel, or by channel/slug', async () => {
     const root = await workspaceWith({
       'email/code/template.json': JSON.stringify({ subject: { 'en-US': 'Code' } }),
@@ -77,7 +92,8 @@ describe('readTemplates', () => {
   it.each([
     [{ 'fax/x-y/en-US.txt': 'Hi' }, 'nulvless/templates/fax is not a channel.'],
     [{ 'sms/x-y/README.md': '# x' }, 'sms/x-y has no language files.'],
-    [{ 'sms/x-y/es-ES.txt': 'Hola' }, 'sms/x-y/es-ES.txt is not a template file.'],
+    [{ 'sms/x-y/en-US.html': 'Hi' }, 'sms/x-y/en-US.html is not a template file.'],
+    [{ 'sms/x-y/.txt': 'Hi' }, 'sms/x-y/.txt is not a template file.'],
     [{ 'email/x-y/en-US.html': 'Hi' }, 'email/x-y/en-US.html has no subject.'],
   ])('refuses a template it cannot push: %j', async (files, message) => {
     const root = await workspaceWith(files);

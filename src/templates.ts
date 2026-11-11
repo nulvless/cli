@@ -6,25 +6,23 @@ import type { ExampleFile } from './examples';
 import { pathExists, TEMPLATES_DIR, WORKSPACE_DIR, writeFiles } from './workspace';
 
 export type TemplateChannel = 'email' | 'sms';
-export type TemplateLanguage = 'en-US' | 'pt-BR';
 
 export const TEMPLATES_PATH = `${WORKSPACE_DIR}/${TEMPLATES_DIR}`;
 export const TEMPLATE_CHANNELS: TemplateChannel[] = ['email', 'sms'];
 
 const SETTINGS_FILE = 'template.json';
-const DEFAULT_LANGUAGE: TemplateLanguage = 'en-US';
-const LANGUAGES: TemplateLanguage[] = ['en-US', 'pt-BR'];
+const DEFAULT_LANGUAGE = 'en-US';
 const EXTENSIONS: Record<TemplateChannel, string> = { email: 'html', sms: 'txt' };
 const IGNORED_FILES = new Set([SETTINGS_FILE, 'README.md']);
 
 export interface TemplateSettings {
   name?: string;
   description?: string;
-  subject?: Partial<Record<TemplateLanguage, string>>;
+  subject?: Record<string, string>;
 }
 
 export interface TemplateVersion {
-  language: TemplateLanguage;
+  language: string;
   subject?: string;
   content: string;
 }
@@ -141,10 +139,10 @@ async function readTemplate(root: string, { channel, slug }: TemplateLocation): 
 
   const versions: TemplateVersion[] = [];
   for (const file of files) {
-    const language = LANGUAGES.find((candidate) => file === `${candidate}.${extension}`);
+    const language = file.endsWith(`.${extension}`) ? file.slice(0, -`.${extension}`.length) : '';
     if (!language) {
       throw new CliError(`${label}/${file} is not a template file.`, {
-        hint: `Name files <language>.${extension} with ${LANGUAGES.join(' or ')}.`,
+        hint: `Name files <language>.${extension}, such as ${DEFAULT_LANGUAGE}.${extension}.`,
       });
     }
 
@@ -172,11 +170,11 @@ export async function readTemplates(root: string, selectors: string[] = []): Pro
 }
 
 export async function writeTemplate(root: string, template: WorkspaceTemplate) {
-  const subjects = template.versions.filter((version) => version.subject);
+  const subjects = template.versions.flatMap(({ language, subject }) => (subject ? [[language, subject] as const] : []));
   const settings: TemplateSettings = {
     ...(template.name ? { name: template.name } : {}),
     ...(template.description ? { description: template.description } : {}),
-    ...(subjects.length ? { subject: Object.fromEntries(subjects.map((version) => [version.language, version.subject])) } : {}),
+    ...(subjects.length ? { subject: Object.fromEntries(subjects) } : {}),
   };
 
   await writeFiles(

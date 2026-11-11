@@ -219,7 +219,7 @@ export interface Secret {
 }
 
 export interface TemplateTranslation {
-  language: 'en-US' | 'pt-BR';
+  language: string;
   subject?: string | null;
   content?: string;
   created_at?: string;
